@@ -28,22 +28,6 @@ import isaaclab_tasks.manager_based.drone_arl.mdp as mdp
 ##
 # Scene definition
 ##
-@configclass
-class MySceneCfg(InteractiveSceneCfg):
-    """Configuration for the terrain scene with a flying robot."""
-
-    # robots
-    robot: MultirotorCfg = MISSING
-
-    # lights
-    sky_light = AssetBaseCfg(
-        prim_path="/World/skyLight",
-        spawn=sim_utils.DomeLightCfg(
-            intensity=750.0,
-            texture_file=f"{ISAAC_NUCLEUS_DIR}/Materials/Textures/Skies/PolyHaven/kloofendal_43d_clear_puresky_4k.hdr",
-        ),
-    )
-
 # @configclass
 # class MySceneCfg(InteractiveSceneCfg):
 #     """Configuration for the terrain scene with a flying robot."""
@@ -53,49 +37,76 @@ class MySceneCfg(InteractiveSceneCfg):
 
 #     # lights
 #     sky_light = AssetBaseCfg(
-#         # ... (your existing light code) ...
-#     )
-
-#     # Doorway
-#     wall_left = AssetBaseCfg(
-#         prim_path="{ENV_REGEX_NS}/Wall_Left",
-#         spawn=sim_utils.CuboidCfg(
-#             size=(0.1, 2.0, 3.0),
-#             rigid_props=sim_utils.RigidBodyPropertiesCfg(disable_gravity=True),
-#             collision_props=sim_utils.CollisionPropertiesCfg(),
-#             visual_material=sim_utils.PreviewSurfaceCfg(diffuse_color=(0.5, 0.5, 0.5))
-#         ),
-#         init_state=AssetBaseCfg.InitialStateCfg(pos=(2.0, -1.5, 1.5)) 
-#     )
-
-#     wall_right = AssetBaseCfg(
-#         prim_path="{ENV_REGEX_NS}/Wall_Right",
-#         spawn=sim_utils.CuboidCfg(
-#             size=(0.1, 2.0, 3.0),
-#             rigid_props=sim_utils.RigidBodyPropertiesCfg(disable_gravity=True),
-#             collision_props=sim_utils.CollisionPropertiesCfg(),
-#         ),
-#         init_state=AssetBaseCfg.InitialStateCfg(pos=(2.0, 1.5, 1.5))
-#     )
-
-#     # Collision detection
-#     from isaaclab.sensors import ContactSensorCfg
-#     contact_forces = ContactSensorCfg(
-#         prim_path="{ENV_REGEX_NS}/Robot/.*",
-#         update_period=0.0, 
-#         history_length=3,
-#         track_air_time=False,
-#         filter_prim_paths_expr=["{ENV_REGEX_NS}/Wall_.*"] 
-#     )
-
-#     # lights
-#     sky_light = AssetBaseCfg(
 #         prim_path="/World/skyLight",
 #         spawn=sim_utils.DomeLightCfg(
 #             intensity=750.0,
 #             texture_file=f"{ISAAC_NUCLEUS_DIR}/Materials/Textures/Skies/PolyHaven/kloofendal_43d_clear_puresky_4k.hdr",
 #         ),
 #     )
+
+@configclass
+class MySceneCfg(InteractiveSceneCfg):
+    """Configuration for the terrain scene with a flying robot."""
+
+    # robots
+    robot: MultirotorCfg = MISSING
+
+    # lights
+    sky_light = AssetBaseCfg(
+        # ... (your existing light code) ...
+    )
+
+    # Doorway walls taking up the full plane except for a 1.0m x 2.0m gap
+    wall_left = AssetBaseCfg(
+        prim_path="{ENV_REGEX_NS}/Wall_Left",
+        spawn=sim_utils.CuboidCfg(
+            size=(0.1, 10.0, 10.0),
+            rigid_props=sim_utils.RigidBodyPropertiesCfg(kinematic_enabled=True),
+            collision_props=sim_utils.CollisionPropertiesCfg(),
+            visual_material=sim_utils.PreviewSurfaceCfg(diffuse_color=(0.5, 0.5, 0.5))
+        ),
+        init_state=AssetBaseCfg.InitialStateCfg(pos=(2.0, -5.5, 5.0)) 
+    )
+
+    wall_right = AssetBaseCfg(
+        prim_path="{ENV_REGEX_NS}/Wall_Right",
+        spawn=sim_utils.CuboidCfg(
+            size=(0.1, 10.0, 10.0),
+            rigid_props=sim_utils.RigidBodyPropertiesCfg(kinematic_enabled=True),
+            collision_props=sim_utils.CollisionPropertiesCfg(),
+        ),
+        init_state=AssetBaseCfg.InitialStateCfg(pos=(2.0, 5.5, 5.0))
+    )
+
+    wall_top = AssetBaseCfg(
+        prim_path="{ENV_REGEX_NS}/Wall_Top",
+        spawn=sim_utils.CuboidCfg(
+            size=(0.1, 1.0, 8.0),
+            rigid_props=sim_utils.RigidBodyPropertiesCfg(kinematic_enabled=True),
+            collision_props=sim_utils.CollisionPropertiesCfg(),
+            visual_material=sim_utils.PreviewSurfaceCfg(diffuse_color=(0.5, 0.5, 0.5))
+        ),
+        init_state=AssetBaseCfg.InitialStateCfg(pos=(2.0, 0.0, 6.0))
+    )
+
+    # Collision detection
+    from isaaclab.sensors import ContactSensorCfg
+    contact_forces = ContactSensorCfg(
+        prim_path="{ENV_REGEX_NS}/Robot/base_link",
+        update_period=0.0, 
+        history_length=3,
+        track_air_time=False,
+        filter_prim_paths_expr=["{ENV_REGEX_NS}/Wall_.*"] 
+    )
+
+    # lights
+    sky_light = AssetBaseCfg(
+        prim_path="/World/skyLight",
+        spawn=sim_utils.DomeLightCfg(
+            intensity=750.0,
+            texture_file=f"{ISAAC_NUCLEUS_DIR}/Materials/Textures/Skies/PolyHaven/kloofendal_43d_clear_puresky_4k.hdr",
+        ),
+    )
 
 
 ##
@@ -113,9 +124,9 @@ class CommandsCfg:
         resampling_time_range=(10.0, 10.0),
         debug_vis=True,
         ranges=mdp.DroneUniformPoseCommandCfg.Ranges(
-            pos_x=(-0.0, 0.0),
-            pos_y=(-0.0, 0.0),
-            pos_z=(-0.0, 0.0),
+            pos_x=(3.0, 5.0),
+            pos_y=(-3.0, 3.0),
+            pos_z=(1.5, 1.5),
             roll=(-0.0, 0.0),
             pitch=(-0.0, 0.0),
             yaw=(-0.0, 0.0),
@@ -176,9 +187,9 @@ class EventCfg:
         mode="reset",
         params={
             "pose_range": {
-                "x": (4.0, 5.0),
-                "y": (-0.5, 0.5),
-                "z": (-0.5, 0.5),
+                "x": (-0.5, 0.5),
+                "y": (-2.5, 2.5),
+                "z": (1.0, 1.5),
                 "yaw": (-math.pi / 6.0, math.pi / 6.0),
                 "roll": (-math.pi / 6.0, math.pi / 6.0),
                 "pitch": (-math.pi / 6.0, math.pi / 6.0),
@@ -243,10 +254,10 @@ class TerminationsCfg:
 
     time_out = DoneTerm(func=mdp.time_out, time_out=True)
     crash = DoneTerm(func=mdp.root_height_below_minimum, params={"minimum_height": -3.0})
-    # crash_wall = DoneTerm(
-    #         func=mdp.illegal_contact,
-    #         params={"sensor_cfg": SceneEntityCfg("contact_forces"), "threshold": 1.0},
-    # )
+    crash_wall = DoneTerm(
+            func=mdp.illegal_contact,
+            params={"sensor_cfg": SceneEntityCfg("contact_forces"), "threshold": 1.0},
+    )
 
 ##
 # Environment configuration
@@ -258,7 +269,7 @@ class TrackPositionNoObstaclesEnvCfg(ManagerBasedRLEnvCfg):
     """Configuration for the state-based drone pose-control environment."""
 
     # Scene settings
-    scene: MySceneCfg = MySceneCfg(num_envs=4096, env_spacing=15.0)
+    scene: MySceneCfg = MySceneCfg(num_envs=4096, env_spacing=25.0)
     # Basic settings
     observations: ObservationsCfg = ObservationsCfg()
     actions: ActionsCfg = ActionsCfg()
