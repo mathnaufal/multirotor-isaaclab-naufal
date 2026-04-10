@@ -22,7 +22,7 @@ from isaaclab.utils.noise import AdditiveUniformNoiseCfg as Unoise
 
 from isaaclab_contrib.assets import MultirotorCfg
 
-import isaaclab_tasks.manager_based.drone_arl.mdp as mdp
+import isaaclab_tasks.manager_based.mr_v1.mdp as mdp
 
 
 ##
@@ -65,7 +65,7 @@ class MySceneCfg(InteractiveSceneCfg):
             collision_props=sim_utils.CollisionPropertiesCfg(),
             visual_material=sim_utils.PreviewSurfaceCfg(diffuse_color=(0.5, 0.5, 0.5))
         ),
-        init_state=AssetBaseCfg.InitialStateCfg(pos=(2.0, -5.5, 5.0)) 
+        init_state=AssetBaseCfg.InitialStateCfg(pos=(2.0, -6.0, 5.0)) 
     )
 
     wall_right = AssetBaseCfg(
@@ -75,18 +75,18 @@ class MySceneCfg(InteractiveSceneCfg):
             rigid_props=sim_utils.RigidBodyPropertiesCfg(kinematic_enabled=True),
             collision_props=sim_utils.CollisionPropertiesCfg(),
         ),
-        init_state=AssetBaseCfg.InitialStateCfg(pos=(2.0, 5.5, 5.0))
+        init_state=AssetBaseCfg.InitialStateCfg(pos=(2.0, 6.0, 5.0))
     )
 
     wall_top = AssetBaseCfg(
         prim_path="{ENV_REGEX_NS}/Wall_Top",
         spawn=sim_utils.CuboidCfg(
-            size=(0.1, 1.0, 8.0),
+            size=(0.1, 2.0, 6.0),
             rigid_props=sim_utils.RigidBodyPropertiesCfg(kinematic_enabled=True),
             collision_props=sim_utils.CollisionPropertiesCfg(),
             visual_material=sim_utils.PreviewSurfaceCfg(diffuse_color=(0.5, 0.5, 0.5))
         ),
-        init_state=AssetBaseCfg.InitialStateCfg(pos=(2.0, 0.0, 6.0))
+        init_state=AssetBaseCfg.InitialStateCfg(pos=(2.0, 0.0, 7.0))
     )
 
     # Collision detection
@@ -210,15 +210,24 @@ class EventCfg:
 class RewardsCfg:
     """Reward terms for the MDP."""
 
-    distance_to_goal_exp = RewTerm(
-        func=mdp.distance_to_goal_exp,
+    # distance_to_goal_exp = RewTerm(
+    #     func=mdp.distance_to_goal_exp,
+    #     weight=25.0,
+    #     params={
+    #         "asset_cfg": SceneEntityCfg("robot"),
+    #         "std": 1.5,
+    #         "command_name": "target_pose",
+    #     },
+    # )
+    geodesic_distance = RewTerm(
+        func=mdp.geodesic_distance_to_goal_exp,
         weight=25.0,
         params={
-            "asset_cfg": SceneEntityCfg("robot"),
-            "std": 1.5,
-            "command_name": "target_pose",
+            "std": 2.0,
+            "door_position": (2.0, 0.0, 2.0)
         },
     )
+
     flat_orientation_l2 = RewTerm(
         func=mdp.flat_orientation_l2,
         weight=1.0,

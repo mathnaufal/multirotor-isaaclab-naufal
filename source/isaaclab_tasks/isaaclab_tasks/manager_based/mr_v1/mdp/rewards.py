@@ -57,6 +57,56 @@ def distance_to_goal_exp(
     position_error_square = torch.sum(torch.square(target_position_w - current_position), dim=1)
     return torch.exp(-position_error_square / std**2)
 
+def geodesic_distance_to_goal_exp(
+    env: ManagerBasedRLEnv,
+    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+    std: float = 1.0,
+    command_name: str = "target_pose",
+    door_position: tuple[float, float, float] = (2.0, 0.0, 1.0),
+    door_half_width: float = 0.5,
+    door_threshold: float = 1.0,  # handoff distance — tune this to your door gap size
+) -> torch.Tensor:
+    asset: RigidObject = env.scene[asset_cfg.name]
+    command = env.command_manager.get_command(command_name)
+    target_position_w = command[:, :3].clone()
+    current_position = asset.data.root_pos_w - env.scene.env_origins
+
+    door_pos = torch.tensor(
+        door_position, device=current_position.device, dtype=current_position.dtype
+    )
+    door_x = door_pos[0]
+    drone_x = current_position[:, 0]
+
+    dist_drone_to_door = torch.norm(door_pos - current_position, p=2, dim=1)
+    dist_drone_to_goal = torch.norm(target_position_w - current_position, p=2, dim=1)
+
+    before_door = (drone_x < door_x)
+
+    # Switch happens when drone is close to the door — BEFORE crossing the wall
+    near_door = dist_drone_to_door < door_threshold  # triggered just before door_x
+
+    # Phase 1: active when before wall AND not yet near the door
+    phase1_active = before_door & ~near_door
+    # Phase 2: active when near the door OR past the wall
+    phase2_active = near_door | ~before_door
+
+    phase1_reward = torch.exp(-dist_drone_to_door / std) * phase1_active.float()
+    phase2_reward = torch.exp(-dist_drone_to_goal / std) * phase2_active.float()
+
+    # # For debug
+    # print(f"Phase 1 (to-door) reward avg: {torch.mean(phase1_reward).item():.3f}")
+    # print(f"Phase 2 (to-goal) reward avg: {torch.mean(phase2_reward).item():.3f}")
+
+    reward = phase1_reward + 1.5 * phase2_reward
+
+    # alignment bonus — only before wall, only if misaligned
+    door_lateral_offset = torch.norm(
+        current_position[:, 1:3] - door_pos[1:3], p=2, dim=1
+    )
+    needs_alignment = (door_lateral_offset > door_half_width).float()
+    alignment_bonus = 0.2 * before_door.float() * needs_alignment * torch.exp(-door_lateral_offset / door_half_width)
+
+    return reward + alignment_bonus
 
 def ang_vel_xyz_exp(
     env: ManagerBasedRLEnv, asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"), std: float = 1.0
