@@ -5,7 +5,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import torch
 
@@ -57,6 +57,170 @@ def distance_to_goal_exp(
     position_error_square = torch.sum(torch.square(target_position_w - current_position), dim=1)
     return torch.exp(-position_error_square / std**2)
 
+
+def distance_to_goal_switch_exp(
+    env: ManagerBasedRLEnv,
+    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+    std: float = 1.0,
+    command_name: str = "target_pose",
+    door_position: tuple[float, float, float] = (2.0, 0.0, 1.0),
+    switch_x_enter: float = 0.1,
+    progress_scale: float = 1.0,
+) -> torch.Tensor:
+    """Distance reward with hard target switching from door to goal.
+
+    Before crossing the door plane, the target is the fixed doorway point.
+    After crossing ``door_x + switch_x_enter``, the target switches to
+    ``target_pose``.
+    """
+    asset: RigidObject = env.scene[asset_cfg.name]
+    command = env.command_manager.get_command(command_name)
+
+    target_position_w = command[:, :3].clone()
+    current_position = asset.data.root_pos_w - env.scene.env_origins
+
+    door_pos = torch.tensor(
+        door_position, device=current_position.device, dtype=current_position.dtype
+    )
+    door_x = door_pos[0]
+    drone_x = current_position[:, 0]
+
+    passed_door = drone_x >= (door_x + switch_x_enter)
+    door_target = door_pos.unsqueeze(0).expand_as(target_position_w)
+    active_target = torch.where(passed_door.unsqueeze(1), target_position_w, door_target)
+
+    active_dist = torch.norm(active_target - current_position, p=2, dim=1)
+
+    # Per-step progress keeps a usable signal even when the goal is far.
+    progress_state: dict[str, Any] = env.__dict__.setdefault("_switch_prog_state", {})
+    prev_dist = progress_state.get("prev_dist")
+    if prev_dist is None or prev_dist.shape[0] != env.num_envs:
+        prev_dist = active_dist.clone()
+
+    reset_mask = env.episode_length_buf == 0
+    prev_dist = torch.where(reset_mask, active_dist, prev_dist)
+
+    progress_reward = progress_scale * (prev_dist - active_dist)
+    progress_state["prev_dist"] = active_dist.detach().clone()
+
+    # Exponential term improves precision near the active target.
+    proximity_reward = torch.exp(-(active_dist**2) / std**2)
+
+    return progress_reward + proximity_reward
+
+
+def prog_distance_to_goal_exp(
+    env: ManagerBasedRLEnv,
+    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+    std: float = 0.5,
+    command_name: str = "target_pose",
+    door_position: tuple[float, float, float] = (2.0, 0.0, 1.0),
+    switch_scale: float = 0.25,
+    progress_scale: float = 1.0,
+    door_half_width: float = 0.6,
+    door_half_height: float = 0.6,
+    door_pass_bonus: float = 2.0,
+    goal_radius: float = 3.0,
+) -> torch.Tensor:
+    """Reward progress using a doorway-routed moving waypoint.
+
+    This avoids far-goal saturation by using per-step distance improvement as
+    the primary signal and only using exponential precision shaping near goal.
+    """
+    asset: RigidObject = env.scene[asset_cfg.name]
+    command = env.command_manager.get_command(command_name)
+
+    target_position_w = command[:, :3].clone()
+    current_position = asset.data.root_pos_w - env.scene.env_origins
+
+    door_pos = torch.tensor(
+        door_position, device=current_position.device, dtype=current_position.dtype
+    )
+    door_x, door_y, door_z = door_pos[0], door_pos[1], door_pos[2]
+    drone_x = current_position[:, 0]
+
+    transition_scale = torch.clamp(
+        torch.as_tensor(switch_scale, device=current_position.device, dtype=current_position.dtype),
+        min=1e-3,
+    )
+    blend_to_door = torch.sigmoid((door_x - drone_x) / transition_scale).unsqueeze(1)
+
+    # Dynamic waypoint: door before crossing, final goal after crossing.
+    moving_waypoint = blend_to_door * door_pos.unsqueeze(0) + (1.0 - blend_to_door) * target_position_w
+
+    # Primary signal: per-step progress to active waypoint.
+    progress_state: dict[str, Any] = env.__dict__.setdefault("_mr_v1_prog_state", {})
+    active_dist = torch.norm(moving_waypoint - current_position, p=2, dim=1)
+
+    prev_dist = progress_state.get("prev_dist")
+    if prev_dist is None or prev_dist.shape[0] != env.num_envs:
+        prev_dist = active_dist.clone()
+
+    reset_mask = env.episode_length_buf == 0
+    prev_dist = torch.where(reset_mask, active_dist, prev_dist)
+    progress_reward = progress_scale * (prev_dist - active_dist)
+    progress_state["prev_dist"] = active_dist.detach().clone()
+
+    # Bonus for passing through the doorway opening.
+    in_door_y = (torch.abs(current_position[:, 1] - door_y) <= door_half_width).float()
+    in_door_z = (torch.abs(current_position[:, 2] - door_z) <= door_half_height).float()
+    passed_plane = (drone_x >= door_x).float()
+    door_pass_reward = door_pass_bonus * passed_plane * in_door_y * in_door_z
+
+    # Precision shaping only when close enough to final goal.
+    goal_dist = torch.norm(target_position_w - current_position, p=2, dim=1)
+    near_goal = (goal_dist < goal_radius).float()
+    goal_precision_reward = near_goal * torch.exp(-(goal_dist**2) / std**2)
+
+    return progress_reward + door_pass_reward + goal_precision_reward
+
+
+def progress_to_active_target_exp(
+    env: ManagerBasedRLEnv,
+    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+    std: float = 1.0,
+    command_name: str = "target_pose",
+    door_position: tuple[float, float, float] = (2.0, 0.0, 1.0),
+    switch_x_enter: float = 0.1,
+    progress_scale: float = 1.0,
+) -> torch.Tensor:
+    """Reward progress to an active target with hard if/else phase switching.
+
+    Uses only x-position to switch from door target to final goal target.
+    """
+    asset: RigidObject = env.scene[asset_cfg.name]
+    command = env.command_manager.get_command(command_name)
+
+    target_position_w = command[:, :3].clone()
+    current_position = asset.data.root_pos_w - env.scene.env_origins
+
+    door_pos = torch.tensor(
+        door_position, device=current_position.device, dtype=current_position.dtype
+    )
+    door_x = door_pos[0]
+
+    drone_x = current_position[:, 0]
+    passed_door = drone_x >= (door_x + switch_x_enter)
+
+    door_target = door_pos.unsqueeze(0).expand_as(target_position_w)
+    active_target = torch.where(passed_door.unsqueeze(1), target_position_w, door_target)
+    active_dist = torch.norm(active_target - current_position, p=2, dim=1)
+
+    progress_state: dict[str, Any] = env.__dict__.setdefault("_phase_prog_state", {})
+    prev_dist = progress_state.get("prev_dist")
+    if prev_dist is None or prev_dist.shape[0] != env.num_envs:
+        prev_dist = active_dist.clone()
+
+    reset_mask = env.episode_length_buf == 0
+    prev_dist = torch.where(reset_mask, active_dist, prev_dist)
+
+    progress_reward = progress_scale * (prev_dist - active_dist)
+    proximity_reward = torch.exp(-(active_dist**2) / std**2)
+
+    progress_state["prev_dist"] = active_dist.detach().clone()
+
+    return progress_reward + proximity_reward
+
 def geodesic_distance_to_goal_exp(
     env: ManagerBasedRLEnv,
     asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
@@ -64,8 +228,18 @@ def geodesic_distance_to_goal_exp(
     command_name: str = "target_pose",
     door_position: tuple[float, float, float] = (2.0, 0.0, 1.0),
     door_half_width: float = 0.5,
-    door_threshold: float = 1.0,  # handoff distance — tune this to your door gap size
+    door_threshold: float = 0.25,
 ) -> torch.Tensor:
+    """Reward progress to goal with a smooth door-aware geodesic distance.
+    The reward blends two path lengths:
+    1) a path that goes via the doorway center, and
+    2) direct distance to the goal.
+    This avoids the hard phase switch that can create a local optimum where the
+    drone hovers right before the door.
+    Note:
+        ``door_threshold`` is used as a sigmoid transition scale (in meters),
+        not a hard distance cutoff.
+    """
     asset: RigidObject = env.scene[asset_cfg.name]
     command = env.command_manager.get_command(command_name)
     target_position_w = command[:, :3].clone()
@@ -79,34 +253,102 @@ def geodesic_distance_to_goal_exp(
 
     dist_drone_to_door = torch.norm(door_pos - current_position, p=2, dim=1)
     dist_drone_to_goal = torch.norm(target_position_w - current_position, p=2, dim=1)
+    dist_door_to_goal  = torch.norm(target_position_w - door_pos, p=2, dim=1)
 
     before_door = (drone_x < door_x)
 
-    # Switch happens when drone is close to the door — BEFORE crossing the wall
-    near_door = dist_drone_to_door < door_threshold  # triggered just before door_x
+    # Approximate shortest feasible path before the wall as going via the door.
+    via_door_distance = dist_drone_to_door + dist_door_to_goal
 
-    # Phase 1: active when before wall AND not yet near the door
-    phase1_active = before_door & ~near_door
-    # Phase 2: active when near the door OR past the wall
-    phase2_active = near_door | ~before_door
+    # Smooth transition around the door plane to avoid reward discontinuities.
+    # door_threshold is the sigmoid scale: smaller => sharper handoff.
+    transition_scale = torch.clamp(
+        torch.as_tensor(door_threshold, device=current_position.device, dtype=current_position.dtype),
+        min=1e-3,
+    )
+    blend_to_via_door = torch.sigmoid((door_x - drone_x) / transition_scale)
 
-    phase1_reward = torch.exp(-dist_drone_to_door / std) * phase1_active.float()
-    phase2_reward = torch.exp(-dist_drone_to_goal / std) * phase2_active.float()
+    # Squared-exponential blended reward (geodesic signal)
+    via_door_reward    = torch.exp(-(via_door_distance**2) / std**2)
+    direct_goal_reward = torch.exp(-(dist_drone_to_goal**2) / std**2)
+    reward = blend_to_via_door * via_door_reward + (1.0 - blend_to_via_door) * direct_goal_reward
 
-    # # For debug
-    # print(f"Phase 1 (to-door) reward avg: {torch.mean(phase1_reward).item():.3f}")
-    # print(f"Phase 2 (to-goal) reward avg: {torch.mean(phase2_reward).item():.3f}")
+    # Linear-kernel convergence bonus — strong gradient near goal, only after door
+    # helps drone precisely converge on goal independent of std tuning
+    convergence_reward = torch.exp(-dist_drone_to_goal / std) * (1.0 - before_door.float())
 
-    reward = phase1_reward + 1.5 * phase2_reward
-
-    # alignment bonus — only before wall, only if misaligned
+    # Alignment bonus — only before wall, only if misaligned laterally
     door_lateral_offset = torch.norm(
         current_position[:, 1:3] - door_pos[1:3], p=2, dim=1
     )
     needs_alignment = (door_lateral_offset > door_half_width).float()
-    alignment_bonus = 0.2 * before_door.float() * needs_alignment * torch.exp(-door_lateral_offset / door_half_width)
+    alignment_bonus = (
+        0.2 * before_door.float() * needs_alignment
+        * torch.exp(-door_lateral_offset / door_half_width)
+    )
 
-    return reward + alignment_bonus
+    # # For debug
+    # phase1_like = torch.mean(blend_to_via_door).item()
+    # phase2_like = torch.mean(1.0 - blend_to_via_door).item()
+    # transition_frac = torch.mean(
+    #     ((blend_to_via_door > 0.1) & (blend_to_via_door < 0.9)).float()
+    # ).item()
+    # past_door_frac = torch.mean((drone_x > door_x).float()).item()
+    # print(
+    #     f"[geo] p1_like={phase1_like:.3f} p2_like={phase2_like:.3f} "
+    #     f"trans={transition_frac:.3f} past_door={past_door_frac:.3f}"
+    # )
+
+    return reward + 0.5 * convergence_reward + alignment_bonus
+
+def potential_field_distance_to_goal_exp(
+    env: ManagerBasedRLEnv,
+    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+    std: float = 1.0,
+    command_name: str = "target_pose",
+    door_position: tuple[float, float, float] = (2.0, 0.0, 1.0),
+    forward_bonus_scale: float = 0.1,
+    forward_bonus_window: float = 0.5,
+) -> torch.Tensor:
+    """Reward progress with a doorway-routed potential field.
+
+    Uses a smooth blend between a via-door path and direct-to-goal distance.
+    This preserves a continuous gradient while encouraging routing through the
+    doorway before crossing the wall plane.
+    """
+    asset: RigidObject = env.scene[asset_cfg.name]
+    command = env.command_manager.get_command(command_name)
+    target_position_w = command[:, :3].clone()
+    current_position = asset.data.root_pos_w - env.scene.env_origins
+
+    door_pos = torch.tensor(
+        door_position, device=current_position.device, dtype=current_position.dtype
+    )
+    door_x = door_pos[0]
+    drone_x = current_position[:, 0]
+
+    dist_drone_to_door = torch.norm(door_pos - current_position, p=2, dim=1)
+    dist_door_to_goal = torch.norm(target_position_w - door_pos, p=2, dim=1)
+    dist_drone_to_goal = torch.norm(target_position_w - current_position, p=2, dim=1)
+
+    # Approximate shortest feasible path before the wall as going via the door.
+    via_door_distance = dist_drone_to_door + dist_door_to_goal
+
+    # Smoothly hand off to direct goal distance near/after the door plane.
+    # Fixed transition scale keeps this reward self-contained.
+    transition_scale = torch.as_tensor(0.25, device=current_position.device, dtype=current_position.dtype)
+    blend_to_via_door = torch.sigmoid((door_x - drone_x) / transition_scale)
+    path_distance = blend_to_via_door * via_door_distance + (1.0 - blend_to_via_door) * dist_drone_to_goal
+
+    # Small directional bonus to help cross the door plane consistently.
+    drone_vel_x = asset.data.root_lin_vel_w[:, 0]
+    forward_bonus = (
+        forward_bonus_scale
+        * torch.clamp(drone_vel_x, min=0.0)
+        * (drone_x < door_x + forward_bonus_window).float()
+    )
+
+    return torch.exp(-path_distance**2 / std**2) + forward_bonus
 
 def ang_vel_xyz_exp(
     env: ManagerBasedRLEnv, asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"), std: float = 1.0

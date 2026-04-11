@@ -133,7 +133,6 @@ class CommandsCfg:
         ),
     )
 
-
 @configclass
 class ActionsCfg:
     """Action specifications for the MDP."""
@@ -210,23 +209,47 @@ class EventCfg:
 class RewardsCfg:
     """Reward terms for the MDP."""
 
-    # distance_to_goal_exp = RewTerm(
-    #     func=mdp.distance_to_goal_exp,
+    distance_to_goal_exp = RewTerm(
+        func=mdp.distance_to_goal_exp,
+        weight=25.0,
+        params={
+            "asset_cfg": SceneEntityCfg("robot"),
+            "std": 0.35,
+            "command_name": "target_pose",
+        },
+    )
+    # geodesic_distance = RewTerm(
+    #     func=mdp.geodesic_distance_to_goal_exp,
+    #     weight=25.0,
+    #     params={
+    #         "std": 1.75,
+    #         "door_position": (2.0, 0.0, 2.0)
+    #     },
+    # )
+    # potential_field_distance = RewTerm(
+    #     func=mdp.potential_field_distance_to_goal_exp,
     #     weight=25.0,
     #     params={
     #         "asset_cfg": SceneEntityCfg("robot"),
     #         "std": 1.5,
     #         "command_name": "target_pose",
+    #         "door_position": (2.0, 0.0, 2.0),
+    #         "forward_bonus_scale": 0.1,
+    #         "forward_bonus_window": 0.5,
     #     },
     # )
-    geodesic_distance = RewTerm(
-        func=mdp.geodesic_distance_to_goal_exp,
-        weight=25.0,
-        params={
-            "std": 2.0,
-            "door_position": (2.0, 0.0, 2.0)
-        },
-    )
+    # moving_waypoint_distance = RewTerm(
+    #     func=mdp.progress_to_active_target_exp,
+    #     weight=25.0,
+    #     params={
+    #         "asset_cfg": SceneEntityCfg("robot"),
+    #         "std": 1.5,
+    #         "command_name": "target_pose",
+    #         "door_position": (2.35, 0.0, 2.0),
+    #         "switch_x_enter": 0.1,
+    #         "progress_scale": 1.0,
+    #     },
+    # )
 
     flat_orientation_l2 = RewTerm(
         func=mdp.flat_orientation_l2,
@@ -292,7 +315,7 @@ class TrackPositionNoObstaclesEnvCfg(ManagerBasedRLEnvCfg):
         """Post initialization."""
         # general settings
         self.decimation = 10
-        self.episode_length_s = 5.0
+        self.episode_length_s = 10.0
         # simulation settings
         self.sim.dt = 0.01
         self.sim.render_interval = self.decimation
