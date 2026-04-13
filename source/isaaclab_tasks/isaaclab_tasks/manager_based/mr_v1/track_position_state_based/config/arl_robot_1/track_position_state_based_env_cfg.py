@@ -124,8 +124,8 @@ class CommandsCfg:
         resampling_time_range=(10.0, 10.0),
         debug_vis=True,
         ranges=mdp.DroneUniformPoseCommandCfg.Ranges(
-            pos_x=(3.0, 5.0),
-            pos_y=(-3.0, 3.0),
+            pos_x=(5.0, 6.0),
+            pos_y=(-1.0, 1.0),
             pos_z=(1.5, 1.5),
             roll=(-0.0, 0.0),
             pitch=(-0.0, 0.0),
@@ -186,8 +186,8 @@ class EventCfg:
         mode="reset",
         params={
             "pose_range": {
-                "x": (-0.5, 0.5),
-                "y": (-2.5, 2.5),
+                "x": (-5.0, -5.0),
+                "y": (-2.0, 2.0),
                 "z": (1.0, 1.5),
                 "yaw": (-math.pi / 6.0, math.pi / 6.0),
                 "roll": (-math.pi / 6.0, math.pi / 6.0),
