@@ -58,6 +58,64 @@ def distance_to_goal_exp(
     return torch.exp(-position_error_square / std**2)
 
 
+def distance_to_goal_falcon_exp(
+    env: ManagerBasedRLEnv,
+    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot", body_names="Falcon1_odometry_sensor_link"),
+    std: float = 1.0,
+    command_name: str = "target_pose",
+) -> torch.Tensor:
+    """Reward Falcon body distance to goal using the same kernel as distance_to_goal_exp."""
+    asset: RigidObject = env.scene[asset_cfg.name]
+    command = env.command_manager.get_command(command_name)
+
+    target_position_w = command[:, :3].clone()
+
+    if isinstance(asset_cfg.body_ids, slice):
+        raise ValueError("asset_cfg must resolve to exactly one body. Set body_names in env_cfg reward params.")
+    if isinstance(asset_cfg.body_ids, list):
+        body_id = int(asset_cfg.body_ids[0])
+    else:
+        body_id = int(asset_cfg.body_ids)
+
+    body_position_w = asset.data.body_pos_w[:, body_id] - env.scene.env_origins
+
+    position_error_square = torch.sum(torch.square(target_position_w - body_position_w), dim=1)
+
+    return torch.exp(-position_error_square / std**2)
+
+
+def progress_to_goal(
+    env: ManagerBasedRLEnv,
+    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+    command_name: str = "target_pose",
+    progress_scale: float = 1.0,
+) -> torch.Tensor:
+    """Reward per-step progress toward the target position.
+
+    Computes the reduction in Euclidean distance to the commanded target between
+    consecutive steps. Positive values indicate moving closer to the goal.
+    """
+    asset: RigidObject = env.scene[asset_cfg.name]
+    command = env.command_manager.get_command(command_name)
+
+    target_position_w = command[:, :3]
+    current_position = asset.data.root_pos_w - env.scene.env_origins
+    current_dist = torch.norm(target_position_w - current_position, p=2, dim=1)
+
+    progress_state: dict[str, Any] = env.__dict__.setdefault("_simple_prog_state", {})
+    prev_dist = progress_state.get("prev_dist")
+    if prev_dist is None or prev_dist.shape[0] != env.num_envs:
+        prev_dist = current_dist.clone()
+
+    reset_mask = env.episode_length_buf == 0
+    prev_dist = torch.where(reset_mask, current_dist, prev_dist)
+
+    progress_reward = progress_scale * (prev_dist - current_dist)
+    progress_state["prev_dist"] = current_dist.detach().clone()
+
+    return progress_reward
+
+
 def distance_to_goal_switch_exp(
     env: ManagerBasedRLEnv,
     asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),

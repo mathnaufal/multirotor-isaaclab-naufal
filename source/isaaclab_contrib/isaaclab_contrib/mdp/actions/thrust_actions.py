@@ -86,11 +86,21 @@ class ThrustAction(ActionTerm):
 
         thruster_names_expr = self._asset.actuators["thrusters"].cfg.thruster_names_expr
 
-        # resolve the thrusters over which the action term is applied
-        self._thruster_ids, self._thruster_names = self._asset.find_bodies(
-            thruster_names_expr, preserve_order=self.cfg.preserve_order
-        )
-        self._num_thrusters = len(self._thruster_ids)
+        # resolve candidate thruster bodies from the articulation
+        _, self._thruster_names = self._asset.find_bodies(thruster_names_expr, preserve_order=self.cfg.preserve_order)
+
+        # Map resolved names to the multirotor's internal thruster-array indices.
+        # Multirotor.set_thrust_target expects indices in this compact thruster array,
+        # not articulation body indices.
+        asset_thruster_names = self._asset.thruster_names
+        name_to_thruster_idx = {name: i for i, name in enumerate(asset_thruster_names)}
+        try:
+            resolved_ids = [name_to_thruster_idx[name] for name in self._thruster_names]
+        except KeyError as exc:
+            raise ValueError(f"Resolved thruster name '{exc.args[0]}' not found in asset thruster list.") from exc
+
+        self._thruster_ids = torch.tensor(resolved_ids, device=self.device, dtype=torch.long)
+        self._num_thrusters = len(resolved_ids)
         # log the resolved thruster names for debugging
         logger.info(
             f"Resolved thruster names for the action term {self.__class__.__name__}:"

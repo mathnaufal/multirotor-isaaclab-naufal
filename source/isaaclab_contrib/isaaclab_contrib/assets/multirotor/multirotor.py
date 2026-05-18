@@ -168,6 +168,8 @@ class Multirotor(Articulation):
         Returns:
             Allocation matrix as a torch tensor on the device.
         """
+        if self.cfg.allocation_matrix is None:
+            return None
         return torch.tensor(self.cfg.allocation_matrix, device=self.device, dtype=torch.float32)
 
     """
@@ -450,6 +452,26 @@ class Multirotor(Articulation):
         # Update thruster names in data container
         self._data.thruster_names = all_thruster_names
 
+        # Safety: if resolved thruster count is larger than preallocated buffers,
+        # grow buffers to avoid out-of-bounds indexing in actuator application.
+        required_thrusters = len(all_thruster_names)
+        current_thrusters = self._data.thrust_target.shape[1]
+        if required_thrusters > current_thrusters:
+            pad = required_thrusters - current_thrusters
+            zeros = torch.zeros(self.num_instances, pad, device=self.device)
+
+            self._data.default_thruster_rps = torch.cat((self._data.default_thruster_rps, zeros), dim=1)
+            self._data.thrust_target = torch.cat((self._data.thrust_target, zeros), dim=1)
+            self._data.computed_thrust = torch.cat((self._data.computed_thrust, zeros), dim=1)
+            self._data.applied_thrust = torch.cat((self._data.applied_thrust, zeros), dim=1)
+            self._thrust_target_sim = torch.cat((self._thrust_target_sim, zeros), dim=1)
+
+            logger.warning(
+                "Resized thruster buffers from %d to %d to match resolved thrusters.",
+                current_thrusters,
+                required_thrusters,
+            )
+
         # Log summary
         logger.info(f"Initialized {len(self.actuators)} thruster actuator(s) for multirotor.")
 
@@ -477,6 +499,36 @@ class Multirotor(Articulation):
         for actuator in self.actuators.values():
             if not isinstance(actuator, Thruster):
                 continue
+
+            # Ensure thrust buffers are wide enough for this actuator group.
+            thruster_dim = self._data.thrust_target.shape[1]
+            required_dim = thruster_dim
+            if isinstance(actuator.thruster_indices, slice):
+                if actuator.thruster_indices == slice(None):
+                    required_dim = thruster_dim
+                else:
+                    # Conservative bound for non-trivial slices.
+                    stop = actuator.thruster_indices.stop
+                    if stop is not None:
+                        required_dim = max(required_dim, int(stop))
+            else:
+                idx_tensor = torch.as_tensor(actuator.thruster_indices, device=self.device)
+                if idx_tensor.numel() > 0:
+                    required_dim = max(required_dim, int(torch.max(idx_tensor).item()) + 1)
+
+            if required_dim > thruster_dim:
+                pad = required_dim - thruster_dim
+                zeros = torch.zeros(self.num_instances, pad, device=self.device)
+                self._data.default_thruster_rps = torch.cat((self._data.default_thruster_rps, zeros), dim=1)
+                self._data.thrust_target = torch.cat((self._data.thrust_target, zeros), dim=1)
+                self._data.computed_thrust = torch.cat((self._data.computed_thrust, zeros), dim=1)
+                self._data.applied_thrust = torch.cat((self._data.applied_thrust, zeros), dim=1)
+                self._thrust_target_sim = torch.cat((self._thrust_target_sim, zeros), dim=1)
+                logger.warning(
+                    "Expanded thrust buffers at runtime from %d to %d for actuator indices.",
+                    thruster_dim,
+                    required_dim,
+                )
 
             # prepare input for actuator model based on cached data
             control_action = MultiRotorActions(
@@ -519,23 +571,39 @@ class Multirotor(Articulation):
     def _combine_thrusts(self):
         """Combine individual thrusts into a wrench vector.
 
-        This internal method uses the allocation matrix to convert individual thruster
-        forces into a 6D wrench vector (3D force + 3D torque) in the body frame. The
-        wrench is then assigned to the base link (body index 0) for application to
-        the simulation.
+        When an allocation matrix is configured, it converts individual thruster forces
+        into a 6D wrench applied to the base link.
 
-        The allocation matrix encodes the geometric configuration of the thrusters,
-        including their positions and orientations relative to the center of mass.
-
-        Mathematical operation:
-            wrench = allocation_matrix @ thrusts
-            where wrench = [Fx, Fy, Fz, Tx, Ty, Tz]^T
+        When allocation_matrix is None, each thruster force is applied directly to its
+        own body link using thruster_force_direction, and reaction torques are applied
+        around the body z-axis using rotor_directions and torque_to_thrust_ratio.
         """
         thrusts = self._thrust_target_sim
-        self._internal_wrench_target_sim = (self.allocation_matrix @ thrusts.T).T
-        # Apply forces to base link (body index 0) only
-        self._internal_force_target_sim[:, 0, :] = self._internal_wrench_target_sim[:, :3]
-        self._internal_torque_target_sim[:, 0, :] = self._internal_wrench_target_sim[:, 3:]
+
+        if self.cfg.allocation_matrix is None:
+            self._internal_force_target_sim.zero_()
+            self._internal_torque_target_sim.zero_()
+
+            force_dir = torch.tensor(
+                self.cfg.thruster_force_direction, device=self.device, dtype=torch.float32
+            )
+
+            for actuator_name, mapping in self._thruster_body_mapping.items():
+                body_indices = mapping["body_indices"]
+                array_indices = mapping["array_indices"]
+                actuator = self.actuators[actuator_name]
+                torque_ratio = float(actuator.cfg.torque_to_thrust_ratio) if hasattr(actuator.cfg, "torque_to_thrust_ratio") else 0.0
+
+                for body_idx, arr_idx in zip(body_indices, array_indices):
+                    self._internal_force_target_sim[:, body_idx, :] = thrusts[:, arr_idx : arr_idx + 1] * force_dir
+                    if self.cfg.rotor_directions is not None:
+                        rotor_dir = self.cfg.rotor_directions[arr_idx]
+                        self._internal_torque_target_sim[:, body_idx, 2] = rotor_dir * torque_ratio * thrusts[:, arr_idx]
+        else:
+            self._internal_wrench_target_sim = (self.allocation_matrix @ thrusts.T).T
+            # Apply forces to base link (body index 0) only
+            self._internal_force_target_sim[:, 0, :] = self._internal_wrench_target_sim[:, :3]
+            self._internal_torque_target_sim[:, 0, :] = self._internal_wrench_target_sim[:, 3:]
 
     def _validate_cfg(self):
         """Validate the multirotor configuration after processing.

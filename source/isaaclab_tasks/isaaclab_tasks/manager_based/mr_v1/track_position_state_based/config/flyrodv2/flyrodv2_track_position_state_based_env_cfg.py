@@ -5,6 +5,7 @@
 
 import math
 from dataclasses import MISSING
+from pathlib import Path
 
 import isaaclab.sim as sim_utils
 from isaaclab.assets import ArticulationCfg, AssetBaseCfg
@@ -16,57 +17,98 @@ from isaaclab.managers import RewardTermCfg as RewTerm
 from isaaclab.managers import SceneEntityCfg
 from isaaclab.managers import TerminationTermCfg as DoneTerm
 from isaaclab.scene import InteractiveSceneCfg
+from isaaclab.sensors.ray_caster import MultiMeshRayCasterCfg, patterns
 from isaaclab.utils import configclass
 from isaaclab.utils.assets import ISAAC_NUCLEUS_DIR
 from isaaclab.utils.noise import AdditiveUniformNoiseCfg as Unoise
 
-# from isaaclab_contrib.assets import MultirotorCfg
+from isaaclab_contrib.actuators import ThrusterCfg
+from isaaclab_contrib.assets import MultirotorCfg
 
 import isaaclab_tasks.manager_based.mr_v1.mdp as mdp
 
 
-##
-# Scene definition
-##
-# @configclass
-# class MySceneCfg(InteractiveSceneCfg):
-#     """Configuration for the terrain scene with a flying robot."""
+_REPO_ROOT = Path(__file__).resolve().parents[8]
+_FALCON_USD_PATH = (
+    _REPO_ROOT
+    / "MARL_cooperative_aerial_manipulation_ext"
+    / "exts"
+    / "MARL_mav_carry_ext"
+    / "MARL_mav_carry_ext"
+    / "assets"
+    / "data"
+    / "AMR"
+    / "falcon"
+    / "falcon.usd"
+)
 
-#     # robots
-#     robot: MultirotorCfg = MISSING
+FALCON_THRUSTER_CFG = ThrusterCfg(
+    thrust_range=(0.1, 10.0),
+    thrust_const_range=(9.26312e-06, 1.826312e-05),
+    tau_inc_range=(0.05, 0.08),
+    tau_dec_range=(0.005, 0.005),
+    torque_to_thrust_ratio=0.07,
+    thruster_names_expr=[
+        "Falcon_rotor_0",
+        "Falcon_rotor_1",
+        "Falcon_rotor_2",
+        "Falcon_rotor_3",
+    ],
+)
 
-#     # lights
-#     sky_light = AssetBaseCfg(
-#         prim_path="/World/skyLight",
-#         spawn=sim_utils.DomeLightCfg(
-#             intensity=750.0,
-#             texture_file=f"{ISAAC_NUCLEUS_DIR}/Materials/Textures/Skies/PolyHaven/kloofendal_43d_clear_puresky_4k.hdr",
-#         ),
-#     )
+FALCON_CFG = MultirotorCfg(
+    spawn=sim_utils.UsdFileCfg(
+        usd_path=str(_FALCON_USD_PATH.resolve()),
+        activate_contact_sensors=True,
+        rigid_props=sim_utils.RigidBodyPropertiesCfg(
+            disable_gravity=False,
+            retain_accelerations=False,
+            linear_damping=0.0,
+            angular_damping=0.0,
+            max_linear_velocity=1000.0,
+            max_angular_velocity=1000.0,
+            max_depenetration_velocity=1.0,
+            enable_gyroscopic_forces=True,
+        ),
+        articulation_props=sim_utils.ArticulationRootPropertiesCfg(
+            enabled_self_collisions=False,
+            solver_position_iteration_count=4,
+            solver_velocity_iteration_count=0,
+        ),
+    ),
+    init_state=MultirotorCfg.InitialStateCfg(
+        pos=(0.0, 0.0, 0.0),
+        lin_vel=(0.0, 0.0, 0.0),
+        ang_vel=(0.0, 0.0, 0.0),
+        rot=(1.0, 0.0, 0.0, 0.0),
+        rps={
+            "Falcon_rotor_0": 200.0,
+            "Falcon_rotor_1": 200.0,
+            "Falcon_rotor_2": 200.0,
+            "Falcon_rotor_3": 200.0,
+        },
+    ),
+    actuators={"thrusters": FALCON_THRUSTER_CFG},
+    rotor_directions=[1, -1, 1, -1],
+    allocation_matrix=None,
+)
+
 
 @configclass
 class MySceneCfg(InteractiveSceneCfg):
-    """Configuration for the terrain scene with a flying robot."""
+    """Scene with doorway walls identical to the flyrod v1 setup."""
 
-    # robots
-    # robot: MultirotorCfg = MISSING
     robot: ArticulationCfg = MISSING  # type: ignore[assignment]
 
-    # lights
-    sky_light = AssetBaseCfg(
-        # ... (your existing light code) ...
-    )
-
-    # Doorway walls taking up the full plane except for a 1.0m x 2.0m gap
     wall_left = AssetBaseCfg(
         prim_path="{ENV_REGEX_NS}/Wall_Left",
         spawn=sim_utils.CuboidCfg(
             size=(0.1, 10.0, 10.0),
             rigid_props=sim_utils.RigidBodyPropertiesCfg(kinematic_enabled=True),
             collision_props=sim_utils.CollisionPropertiesCfg(),
-            visual_material=sim_utils.PreviewSurfaceCfg(diffuse_color=(0.5, 0.5, 0.5))
+            visual_material=sim_utils.PreviewSurfaceCfg(diffuse_color=(0.5, 0.5, 0.5)),
         ),
-        init_state=AssetBaseCfg.InitialStateCfg(pos=(2.0, -6.0, 5.0)) 
+        init_state=AssetBaseCfg.InitialStateCfg(pos=(2.0, -6.0, 5.0)),
     )
 
     wall_right = AssetBaseCfg(
@@ -75,8 +117,9 @@ class MySceneCfg(InteractiveSceneCfg):
             size=(0.1, 10.0, 10.0),
             rigid_props=sim_utils.RigidBodyPropertiesCfg(kinematic_enabled=True),
             collision_props=sim_utils.CollisionPropertiesCfg(),
+            visual_material=sim_utils.PreviewSurfaceCfg(diffuse_color=(0.5, 0.5, 0.5)),
         ),
-        init_state=AssetBaseCfg.InitialStateCfg(pos=(2.0, 6.0, 5.0))
+        init_state=AssetBaseCfg.InitialStateCfg(pos=(2.0, 6.0, 5.0)),
     )
 
     wall_top = AssetBaseCfg(
@@ -85,22 +128,70 @@ class MySceneCfg(InteractiveSceneCfg):
             size=(0.1, 2.0, 6.0),
             rigid_props=sim_utils.RigidBodyPropertiesCfg(kinematic_enabled=True),
             collision_props=sim_utils.CollisionPropertiesCfg(),
-            visual_material=sim_utils.PreviewSurfaceCfg(diffuse_color=(0.5, 0.5, 0.5))
+            visual_material=sim_utils.PreviewSurfaceCfg(diffuse_color=(0.5, 0.5, 0.5)),
         ),
-        init_state=AssetBaseCfg.InitialStateCfg(pos=(2.0, 0.0, 7.0))
+        init_state=AssetBaseCfg.InitialStateCfg(pos=(2.0, 0.0, 7.0)),
     )
 
-    # Collision detection
+    floor = AssetBaseCfg(
+        prim_path="{ENV_REGEX_NS}/Wall_Floor",
+        spawn=sim_utils.CuboidCfg(
+            size=(20.0, 24.0, 0.1),
+            rigid_props=sim_utils.RigidBodyPropertiesCfg(kinematic_enabled=True),
+            collision_props=sim_utils.CollisionPropertiesCfg(),
+            visual_material=sim_utils.PreviewSurfaceCfg(diffuse_color=(0.35, 0.35, 0.35)),
+        ),
+        init_state=AssetBaseCfg.InitialStateCfg(pos=(2.0, 0.0, -0.05)),
+    )
+
+    wall_env_left = AssetBaseCfg(
+        prim_path="{ENV_REGEX_NS}/Wall_Env_Left",
+        spawn=sim_utils.CuboidCfg(
+            size=(20.0, 0.1, 10.0),
+            rigid_props=sim_utils.RigidBodyPropertiesCfg(kinematic_enabled=True),
+            collision_props=sim_utils.CollisionPropertiesCfg(),
+            visual_material=sim_utils.PreviewSurfaceCfg(diffuse_color=(0.5, 0.5, 0.5)),
+        ),
+        init_state=AssetBaseCfg.InitialStateCfg(pos=(2.0, -12.0, 5.0)),
+    )
+
+    wall_env_right = AssetBaseCfg(
+        prim_path="{ENV_REGEX_NS}/Wall_Env_Right",
+        spawn=sim_utils.CuboidCfg(
+            size=(20.0, 0.1, 10.0),
+            rigid_props=sim_utils.RigidBodyPropertiesCfg(kinematic_enabled=True),
+            collision_props=sim_utils.CollisionPropertiesCfg(),
+            visual_material=sim_utils.PreviewSurfaceCfg(diffuse_color=(0.5, 0.5, 0.5)),
+        ),
+        init_state=AssetBaseCfg.InitialStateCfg(pos=(2.0, 12.0, 5.0)),
+    )
+
     from isaaclab.sensors import ContactSensorCfg
+
     contact_forces = ContactSensorCfg(
-        prim_path="{ENV_REGEX_NS}/Robot/base_link",
-        update_period=0.0, 
+        prim_path="{ENV_REGEX_NS}/Robot/.*",
+        update_period=0.0,
         history_length=3,
         track_air_time=False,
-        filter_prim_paths_expr=["{ENV_REGEX_NS}/Wall_.*"] 
+        filter_prim_paths_expr=["{ENV_REGEX_NS}/Wall_.*"],
     )
 
-    # lights
+    lidar = MultiMeshRayCasterCfg(
+        prim_path="{ENV_REGEX_NS}/Robot/Falcon_base_link",
+        update_period=0.0,
+        offset=MultiMeshRayCasterCfg.OffsetCfg(pos=(0.0, 0.0, 0.0), rot=(1.0, 0.0, 0.0, 0.0)),
+        mesh_prim_paths=["{ENV_REGEX_NS}/Wall_.*"],
+        ray_alignment="yaw",
+        pattern_cfg=patterns.LidarPatternCfg(
+            channels=1,
+            vertical_fov_range=(0.0, 0.0),
+            horizontal_fov_range=(-90.0, 90.0),
+            horizontal_res=45.0,
+        ),
+        max_distance=10.0,
+        debug_vis=True,
+    )
+
     sky_light = AssetBaseCfg(
         prim_path="/World/skyLight",
         spawn=sim_utils.DomeLightCfg(
@@ -110,23 +201,18 @@ class MySceneCfg(InteractiveSceneCfg):
     )
 
 
-##
-# MDP settings
-##
-
-
 @configclass
 class CommandsCfg:
     """Command specifications for the MDP."""
 
     target_pose = mdp.DroneUniformPoseCommandCfg(
         asset_name="robot",
-        body_name="base_link",
+        body_name="Falcon_base_link",
         resampling_time_range=(10.0, 10.0),
         debug_vis=True,
         ranges=mdp.DroneUniformPoseCommandCfg.Ranges(
             pos_x=(9.0, 9.0),
-            pos_y=(-1.0, 1.0),
+            pos_y=(-0.0, 0.0),
             pos_z=(1.5, 1.5),
             roll=(-0.0, 0.0),
             pitch=(-0.0, 0.0),
@@ -134,34 +220,41 @@ class CommandsCfg:
         ),
     )
 
+
 @configclass
 class ActionsCfg:
-    """Action specifications for the MDP."""
+    """Action specifications for the MDP.
+
+    Single agent outputs 8 independent thrust commands, one per rotor.
+    With allocation_matrix=None each thrust is applied directly to its
+    own rotor body so Falcon1 and Falcon2 are controlled independently
+    through the rope dynamics.
+    """
 
     thrust_command = mdp.ThrustActionCfg(
         asset_name="robot",
-        scale=3.0,
-        offset=3.0,
-        preserve_order=False,
+        scale=2.0,
+        offset=2.2,
+        preserve_order=True,
         use_default_offset=False,
-        clip={
-            "back_left_prop": (0.0, 6.0),
-            "back_right_prop": (0.0, 6.0),
-            "front_left_prop": (0.0, 6.0),
-            "front_right_prop": (0.0, 6.0),
-        },
+        clip={".*": (0.1, 10.0)},
     )
 
 
 @configclass
 class ObservationsCfg:
-    """Observation specifications for the MDP."""
+    """Observation specifications for the MDP.
+
+    Tracks the rod_link (body 0 / articulation root) state.  The drones'
+    positions relative to the rod are not included here; add body_pos_w
+    observations for Falcon1_base_link and Falcon2_base_link if the policy
+    needs explicit rope-configuration awareness.
+    """
 
     @configclass
     class PolicyCfg(ObsGroup):
         """Observations for policy group."""
 
-        # observation terms (order preserved)
         base_link_position = ObsTerm(func=mdp.root_pos_w, noise=Unoise(n_min=-0.1, n_max=0.1))
         base_orientation = ObsTerm(func=mdp.root_quat_w, noise=Unoise(n_min=-0.1, n_max=0.1))
         base_lin_vel = ObsTerm(func=mdp.base_lin_vel, noise=Unoise(n_min=-0.1, n_max=0.1))
@@ -172,7 +265,6 @@ class ObservationsCfg:
             self.enable_corruption = False
             self.concatenate_terms = True
 
-    # observation groups
     policy: PolicyCfg = PolicyCfg()
 
 
@@ -180,15 +272,13 @@ class ObservationsCfg:
 class EventCfg:
     """Configuration for events."""
 
-    # reset
-
     reset_base = EventTerm(
         func=mdp.reset_root_state_uniform,
         mode="reset",
         params={
             "pose_range": {
                 "x": (-6.0, -6.0),
-                "y": (-2.0, 2.0),
+                "y": (-10.0, 10.0),
                 "z": (1.0, 1.5),
                 "yaw": (-math.pi / 6.0, math.pi / 6.0),
                 "roll": (-math.pi / 6.0, math.pi / 6.0),
@@ -208,7 +298,11 @@ class EventCfg:
 
 @configclass
 class RewardsCfg:
-    """Reward terms for the MDP."""
+    """Reward terms for the MDP.
+
+    All positional rewards track the rod_link (body 0) because that is the
+    payload we want to navigate through the doorway.
+    """
 
     progress_to_goal = RewTerm(
         func=mdp.progress_to_goal,
@@ -228,49 +322,10 @@ class RewardsCfg:
             "command_name": "target_pose",
         },
     )
-
-    # geodesic_distance = RewTerm(
-    #     func=mdp.geodesic_distance_to_goal_exp,
-    #     weight=25.0,
-    #     params={
-    #         "std": 1.75,
-    #         "door_position": (2.0, 0.0, 2.0)
-    #     },
-    # )
-    # potential_field_distance = RewTerm(
-    #     func=mdp.potential_field_distance_to_goal_exp,
-    #     weight=25.0,
-    #     params={
-    #         "asset_cfg": SceneEntityCfg("robot"),
-    #         "std": 1.5,
-    #         "command_name": "target_pose",
-    #         "door_position": (2.0, 0.0, 2.0),
-    #         "forward_bonus_scale": 0.1,
-    #         "forward_bonus_window": 0.5,
-    #     },
-    # )
-    # moving_waypoint_distance = RewTerm(
-    #     func=mdp.progress_to_active_target_exp,
-    #     weight=25.0,
-    #     params={
-    #         "asset_cfg": SceneEntityCfg("robot"),
-    #         "std": 1.5,
-    #         "command_name": "target_pose",
-    #         "door_position": (2.35, 0.0, 2.0),
-    #         "switch_x_enter": 0.1,
-    #         "progress_scale": 1.0,
-    #     },
-    # )
-
     flat_orientation_l2 = RewTerm(
         func=mdp.flat_orientation_l2,
-        weight=1.0,
+        weight=-1.0,
         params={"asset_cfg": SceneEntityCfg("robot")},
-    )
-    yaw_aligned = RewTerm(
-        func=mdp.yaw_aligned,
-        weight=2.0,
-        params={"asset_cfg": SceneEntityCfg("robot"), "std": 1.0},
     )
     lin_vel_xyz_exp = RewTerm(
         func=mdp.lin_vel_xyz_exp,
@@ -279,7 +334,7 @@ class RewardsCfg:
     )
     ang_vel_xyz_exp = RewTerm(
         func=mdp.ang_vel_xyz_exp,
-        weight=10.0,
+        weight=1.0,
         params={"asset_cfg": SceneEntityCfg("robot"), "std": 10.0},
     )
     action_rate_l2 = RewTerm(func=mdp.action_rate_l2, weight=-0.05)
@@ -296,38 +351,34 @@ class TerminationsCfg:
     """Termination terms for the MDP."""
 
     time_out = DoneTerm(func=mdp.time_out, time_out=True)
-    crash = DoneTerm(func=mdp.root_height_below_minimum, params={"minimum_height": -3.0})
+    crash = DoneTerm(func=mdp.root_height_below_minimum, params={"minimum_height": -0.05})
     crash_wall = DoneTerm(
-            func=mdp.illegal_contact,
-            params={"sensor_cfg": SceneEntityCfg("contact_forces"), "threshold": 1.0},
+        func=mdp.illegal_contact,
+        params={"sensor_cfg": SceneEntityCfg("contact_forces"), "threshold": 1.0},
     )
-
-##
-# Environment configuration
-##
 
 
 @configclass
-class TrackPositionNoObstaclesEnvCfg(ManagerBasedRLEnvCfg):
-    """Configuration for the state-based drone pose-control environment."""
+class FlyrodV2TrackPositionEnvCfg(ManagerBasedRLEnvCfg):
+    """Single-agent env cfg for rope-connected dual-drone payload transport.
 
-    # Scene settings
+    Two Falcon quadrotors carry a rod payload via compliant rope joints.
+    Unlike flyrod v1 (rigid rod + allocation matrix), this config uses
+    allocation_matrix=None so each rotor applies force to its own body
+    and the rope dynamics handle the rest.
+    """
+
     scene: MySceneCfg = MySceneCfg(num_envs=4096, env_spacing=25.0)
-    # Basic settings
     observations: ObservationsCfg = ObservationsCfg()
     actions: ActionsCfg = ActionsCfg()
     commands: CommandsCfg = CommandsCfg()
-    # MDP settings
     rewards: RewardsCfg = RewardsCfg()
     terminations: TerminationsCfg = TerminationsCfg()
     events: EventCfg = EventCfg()
 
     def __post_init__(self):
-        """Post initialization."""
-        # general settings
         self.decimation = 10
-        self.episode_length_s = 10.0
-        # simulation settings
+        self.episode_length_s = 5.0
         self.sim.dt = 0.01
         self.sim.render_interval = self.decimation
         self.sim.physics_material = sim_utils.RigidBodyMaterialCfg(
