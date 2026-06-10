@@ -331,7 +331,8 @@ class VisualizationMarkers:
             else:
                 # check that number of markers is not zero
                 if num_markers == 0:
-                    raise ValueError("Number of markers cannot be zero! Hint: The function was called with no inputs?")
+                    # nothing to visualize; silently return to avoid spamming errors
+                    return
                 # set all markers to be the first prototype
                 self._instancer_manager.GetProtoIndicesAttr().Set([0] * num_markers)
         # set number of markers

@@ -5,14 +5,14 @@
 
 from isaaclab.utils import configclass
 
-from .flyrodv2_track_position_state_based_env_cfg import FALCON_CFG, FlyrodV2TrackPositionEnvCfg
+from .flyrodv2_track_position_state_based_env_cfg import FLYROD_CFG, FlyrodV2TrackPositionEnvCfg
 
 
 @configclass
 class FlyrodV2NoObstacleEnvCfg(FlyrodV2TrackPositionEnvCfg):
     def __post_init__(self):
         super().__post_init__()
-        self.scene.robot = FALCON_CFG.replace(prim_path="{ENV_REGEX_NS}/Robot")
+        self.scene.robot = FLYROD_CFG.replace(prim_path="{ENV_REGEX_NS}/Robot")
         self.scene.robot.actuators["thrusters"].dt = self.sim.dt
 
 

@@ -115,6 +115,33 @@ def progress_to_goal(
 
     return progress_reward
 
+def obstacle_penalty_lidar(
+    env: ManagerBasedRLEnv,
+    sensor_cfg: SceneEntityCfg = SceneEntityCfg("lidar_360"),
+    warning_distance: float = 1.0,
+    critical_distance: float = 0.3,
+) -> torch.Tensor:
+    """Soft obstacle-avoidance penalty from the closest LiDAR return.
+
+    The penalty is zero when all rays are at or beyond `warning_distance`.
+    It ramps up smoothly inside that radius and becomes much steeper once the
+    closest return drops below `critical_distance`.
+    """
+    sensor = env.scene.sensors[sensor_cfg.name]
+    max_dist = float(sensor.cfg.max_distance)
+
+    distances = torch.norm(sensor.data.ray_hits_w - sensor.data.pos_w.unsqueeze(1), dim=-1)
+    distances = torch.nan_to_num(distances, nan=max_dist, posinf=max_dist, neginf=0.0)
+    closest_distance = torch.min(distances, dim=1).values
+
+    span = max(warning_distance - critical_distance, 1e-6)
+    proximity = torch.clamp((warning_distance - closest_distance) / span, min=0.0, max=1.0)
+
+    # Smooth, continuous shaping: gentle near 1 m, sharp as the ray approaches 0.3 m.
+    penalty = proximity**2 + 2.0 * proximity**4
+
+    return penalty
+
 
 def distance_to_goal_switch_exp(
     env: ManagerBasedRLEnv,

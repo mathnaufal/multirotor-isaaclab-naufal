@@ -33,7 +33,7 @@ from isaaclab.utils.math import (
     sample_uniform,
 )
 
-from .direct_marl_flyrod_env_cfg import DirectMARLFlyrodEnvCfg
+from .direct_marl_flyrod_env_cfg_v2 import DirectMARLFlyrodEnvCfg
 
 
 class DirectMARLFlyrodEnv(DirectMARLEnv):
@@ -45,9 +45,28 @@ class DirectMARLFlyrodEnv(DirectMARLEnv):
 
         # body indices
         self._falcon_idx, self._falcon_body_names = self.robot.find_bodies(cfg.falcon_names)
-        self._falcon_rotor_idx = self.robot.find_bodies(cfg.falcon_rotor_names)[0]
+        self._falcon_rotor_idx, self._falcon_rotor_names = self.robot.find_bodies(cfg.falcon_rotor_names)
         self._payload_idx = self.robot.find_bodies(cfg.payload_name)[0]
         self._rope_idx = self._resolve_rope_indices()
+
+        falcon1_rotor_ids, falcon1_rotor_names = self.robot.find_bodies("Falcon1_rotor_.*")
+        falcon2_rotor_ids, falcon2_rotor_names = self.robot.find_bodies("Falcon2_rotor_.*")
+        falcon1_pairs = sorted(zip(falcon1_rotor_names, falcon1_rotor_ids))
+        falcon2_pairs = sorted(zip(falcon2_rotor_names, falcon2_rotor_ids))
+        self._falcon1_rotor_idx = [int(body_id) for _, body_id in falcon1_pairs]
+        self._falcon2_rotor_idx = [int(body_id) for _, body_id in falcon2_pairs]
+
+        rotor_id_to_force_index = {int(body_id): idx for idx, body_id in enumerate(self._falcon_rotor_idx)}
+        self._falcon1_rotor_force_idx = torch.tensor(
+            [rotor_id_to_force_index[body_id] for body_id in self._falcon1_rotor_idx],
+            device=self.device,
+            dtype=torch.long,
+        )
+        self._falcon2_rotor_force_idx = torch.tensor(
+            [rotor_id_to_force_index[body_id] for body_id in self._falcon2_rotor_idx],
+            device=self.device,
+            dtype=torch.long,
+        )
 
         # configuration
         self._num_drones = len(self._falcon_idx)
@@ -66,17 +85,19 @@ class DirectMARLFlyrodEnv(DirectMARLEnv):
                 f"divisible by {self._num_drones}, found {len(self._rope_idx)}"
             )
 
-        # # observation buffers
+        # observation buffers
         self._observation_buffers = {}
         for agent in self.cfg.possible_agents:
             self._observation_buffers[agent] = CircularBuffer(cfg.history_len, self.num_envs, device=self.device)
 
         # action buffers
-        # buffers — initialize z-forces to hover thrust to avoid cold-start fall
-        _hover_thrust_per_rotor = (2 * 0.6017 + 1.4) * 9.8066 / 8  # total_mass * g / num_rotors ≈ 3.19 N
+        # buffers -- initialize z-forces to hover thrust to avoid cold-start fall
+        _hover_thrust_per_rotor = (2 * 0.6017 + self.cfg.rod_mass) * 9.8066 / 8
         self._forces = torch.zeros(self.num_envs, len(self._falcon_rotor_idx), 3, device=self.device)
         self._forces[..., 2] = _hover_thrust_per_rotor
         self._moments = torch.zeros(self.num_envs, len(self._falcon_idx), 3, device=self.device)
+        self._thrust_cmds = torch.zeros(self.num_envs, len(self._falcon_rotor_idx), device=self.device)
+        self._thrust_cmds[:] = _hover_thrust_per_rotor
         # self.setpoint_delay_buffers = {}
         # for agent in self.cfg.possible_agents:
         #     self.setpoint_delay_buffers[agent] = DelayBuffer(cfg.max_delay, self.num_envs, device=self.device)
@@ -89,6 +110,8 @@ class DirectMARLFlyrodEnv(DirectMARLEnv):
                 self.prev_actions[agent] = torch.zeros(self.num_envs, 12, device=self.device)
             elif self._control_mode == "ACCBR":
                 self.prev_actions[agent] = torch.zeros(self.num_envs, 5, device=self.device)
+            elif self._control_mode == "THRUST":
+                self.prev_actions[agent] = torch.zeros(self.num_envs, 4, device=self.device)
 
         self.drone_positions = torch.zeros(self.num_envs, self._num_drones, 3, device=self.device)
         self.drone_orientations = torch.zeros(self.num_envs, self._num_drones, 4, device=self.device)
@@ -187,7 +210,7 @@ class DirectMARLFlyrodEnv(DirectMARLEnv):
 
         self.attach_offsets_local = attach_offsets.unsqueeze(0).expand(self.num_envs, self._num_drones, 3).contiguous()
 
-        # # -- metrics
+        # -- metrics
         self.metrics = {}
         self.metrics["position_error"] = torch.zeros(self.num_envs, device=self.device)
         self.metrics["orientation_error"] = torch.zeros(self.num_envs, device=self.device)
@@ -196,6 +219,7 @@ class DirectMARLFlyrodEnv(DirectMARLEnv):
         # termination buffers
         self.falcon_fly_low = torch.zeros(self.num_envs, device=self.device, dtype=torch.bool)
         self.payload_fly_low = torch.zeros(self.num_envs, device=self.device, dtype=torch.bool)
+        self.falcon_fly_high = torch.zeros(self.num_envs, device=self.device, dtype=torch.bool)
         self.illegal_contact = torch.zeros(self.num_envs, device=self.device, dtype=torch.bool)
         self.angle_limit_drone = torch.zeros(self.num_envs, device=self.device, dtype=torch.bool)
         self.angle_limit_load = torch.zeros(self.num_envs, device=self.device, dtype=torch.bool)
@@ -250,14 +274,23 @@ class DirectMARLFlyrodEnv(DirectMARLEnv):
             # actions[agent][:] = self.setpoint_delay_buffers[agent].compute(actions[agent])
 
         for drone, action in actions.items():
+            if self._control_mode == "THRUST":
+                action_clamped = torch.clamp(action, -1.0, 1.0)
+                # Map from [-1, 1] to [thrust_min, thrust_max] using tensor arithmetic
+                lower = torch.tensor(self.cfg.thrust_min, device=action_clamped.device, dtype=action_clamped.dtype)
+                upper = torch.tensor(self.cfg.thrust_max, device=action_clamped.device, dtype=action_clamped.dtype)
+                thrusts = (action_clamped + 1.0) * 0.5 * (upper - lower) + lower
+                if drone == "falcon1":
+                    self._thrust_cmds[:, self._falcon1_rotor_force_idx] = thrusts
+                elif drone == "falcon2":
+                    self._thrust_cmds[:, self._falcon2_rotor_force_idx] = thrusts
+                continue
 
             if self._control_mode == "geometric":
                 self._setpoints[drone]["pos"] = action[:, :3]
                 self._setpoints[drone]["lin_vel"] = action[:, 3:6]
                 self._setpoints[drone]["lin_acc"] = action[:, 6:9]
                 self._setpoints[drone]["jerk"] = action[:, 9:12]
-
-                # self._desired_position[:, i] = self.drone_setpoint[i]["pos"]
 
             elif self._control_mode == "ACCBR":
                 self._setpoints[drone]["lin_acc"] = action[:, :3] * self.cfg.acc_scale
@@ -268,7 +301,10 @@ class DirectMARLFlyrodEnv(DirectMARLEnv):
             self._setpoints[drone]["yaw_acc"] = self._constant_yaw
 
     def _apply_action(self) -> None:
-        if self._ll_counter % self.cfg.low_level_decimation == 0:
+        if self._control_mode == "THRUST":
+            self._forces[..., 2] = self._thrust_cmds
+            self._moments.zero_()
+        elif self._ll_counter % self.cfg.low_level_decimation == 0:
             all_thrusts = []
             all_moments = []
 
@@ -315,23 +351,9 @@ class DirectMARLFlyrodEnv(DirectMARLEnv):
                     drone_states, self._forces[:, i * 4 : i * 4 + 4], self._setpoints[f"falcon{i+1}"]
                 )
 
-                # alpha_cmd, acc_load, acc_cmd, q_cmd, target_rpm = self.geo_controllers[i].getCommand(
-                #     drone_states, self._forces[:, i * 4 : i * 4 + 4], self._setpoints[f"falcon{i+1}"]
-                # )
-
                 target_rpm = self._indi_controllers[i].getCommand(
                     drone_states, self._forces[:, i * 4 : i * 4 + 4], alpha_cmd, acc_cmd, acc_load
                 )
-
-                # target_rpm = self._indi_controllers[i].getCommand(
-                #     drone_states, self._forces[:, i * 4 : i * 4 + 4], self._setpoints[f"falcon{i+1}"])
-
-                # if self.cfg.debug_vis:
-                #     self.drone_positions_debug[:, i] = drone_states["pos"] + self._env.scene.env_origins
-                #     if self._control_mode == "geometric":
-                #         self.drone_goals_debug[:, i] = self.drone_setpoint[i]["pos"] + self._env.scene.env_origins
-                #     self.des_acc_debug[:, i] = acc_cmd
-                #     self.des_ori_debug[:, i] = q_cmd
 
                 thrusts, moments = self.motor_models[i].get_motor_thrusts_moments(target_rpm, self.sampling_time)
                 all_thrusts.append(thrusts)
@@ -376,30 +398,30 @@ class DirectMARLFlyrodEnv(DirectMARLEnv):
         self.goal_pos_error[:] = self.pose_command_w[:, :3] - self.load_position
         self.drone_to_goal_error[:] = self.pose_command_w[:, :3].unsqueeze(1) - self.drone_positions
 
-        # ── Noisy observation copies (Gaps 1 & 2) ────────────────────────────
-        # Class buffers above stay clean — rewards and terminations read them directly.
+        # -- Noisy observation copies (Gaps 1 & 2)
+        # Class buffers above stay clean -- rewards and terminations read them directly.
         # Only the tensors passed into obs construction are perturbed, simulating
         # IMU drift, MOCAP jitter, and 6-DOF payload pose estimation error.
         _pn = self.cfg.position_noise_std
         _vn = self.cfg.velocity_noise_std
         _on = self.cfg.orient_noise_std
         _an = self.cfg.ang_vel_noise_std
-        load_pos_obs      = self.load_position            + torch.randn_like(self.load_position) * _pn
-        load_vel_obs      = self.load_vel                 + torch.randn_like(self.load_vel) * _vn
-        load_ang_vel_obs  = self.load_ang_vel             + torch.randn_like(self.load_ang_vel) * _an
-        drone_pos_obs     = self.drone_positions          + torch.randn_like(self.drone_positions) * _pn
-        drone_vel_obs     = self.drone_linear_velocities  + torch.randn_like(self.drone_linear_velocities) * _vn
+        load_pos_obs = self.load_position + torch.randn_like(self.load_position) * _pn
+        load_vel_obs = self.load_vel + torch.randn_like(self.load_vel) * _vn
+        load_ang_vel_obs = self.load_ang_vel + torch.randn_like(self.load_ang_vel) * _an
+        drone_pos_obs = self.drone_positions + torch.randn_like(self.drone_positions) * _pn
+        drone_vel_obs = self.drone_linear_velocities + torch.randn_like(self.drone_linear_velocities) * _vn
         drone_ang_vel_obs = self.drone_angular_velocities + torch.randn_like(self.drone_angular_velocities) * _an
 
-        # SO(3)-preserving orientation noise: apply a small random rotation (axis-angle → quat)
+        # SO(3)-preserving orientation noise: apply a small random rotation (axis-angle -> quat)
         # so the rotation matrix fed to the policy stays a valid element of SO(3).
         if _on > 0.0:
-            # Load: random unit axis × small angle → delta quaternion → perturbed R
+            # Load: random unit axis x small angle -> delta quaternion -> perturbed R
             ax_l = torch.randn(self.num_envs, 3, device=self.device)
             ax_l = ax_l / ax_l.norm(dim=-1, keepdim=True).clamp(min=1e-8)
             dq_l = quat_from_angle_axis(torch.randn(self.num_envs, device=self.device) * _on, ax_l)
             load_mat_obs = matrix_from_quat(quat_mul(dq_l, self.load_orientation))
-            # Drones: flatten (num_envs, num_drones, 4) → (N, 4), perturb, reshape
+            # Drones: flatten (num_envs, num_drones, 4) -> (N, 4), perturb, reshape
             nd = self.num_envs * self._num_drones
             ax_d = torch.randn(nd, 3, device=self.device)
             ax_d = ax_d / ax_d.norm(dim=-1, keepdim=True).clamp(min=1e-8)
@@ -412,22 +434,13 @@ class DirectMARLFlyrodEnv(DirectMARLEnv):
             drone_rot_obs = self.drone_rot_matrices
 
         # Goal errors derived from noisy positions so they are internally consistent
-        goal_error_obs    = self.pose_command_w[:, :3] - load_pos_obs
+        goal_error_obs = self.pose_command_w[:, :3] - load_pos_obs
         drone_to_goal_obs = self.pose_command_w[:, :3].unsqueeze(1) - drone_pos_obs
 
         lidar_f1_obs = ()
         lidar_f2_obs = ()
 
         # LiDAR observations are disabled for this variant.
-
-        # action_histories = []
-        # for agent in self.cfg.possible_agents:
-        #     if self.setpoint_delay_buffers[agent]._circular_buffer._buffer is None:
-        #         action_history = self.actions[agent].unsqueeze(1).repeat(1, self.cfg.max_delay + 1, 1)
-        #         action_histories.append(action_history)
-        #     else:
-        #         action_histories.append(self.setpoint_delay_buffers[agent]._circular_buffer.buffer)
-        # self.all_action_histories = torch.cat(action_histories, dim=-1)
 
         if self.cfg.partial_obs:
             obs_falcon1_t = torch.cat(
@@ -528,7 +541,7 @@ class DirectMARLFlyrodEnv(DirectMARLEnv):
                 self.drone_rot_matrices.view(self.num_envs, -1),
                 self.drone_linear_velocities.view(self.num_envs, -1),
                 self.drone_angular_velocities.view(self.num_envs, -1),
-                # goal terms — position error only (no orientation goal)
+                # goal terms -- position error only (no orientation goal)
                 self.goal_pos_error,
             ),
             dim=-1,
@@ -545,7 +558,7 @@ class DirectMARLFlyrodEnv(DirectMARLEnv):
         goal_pos_error = self.pose_command_w[:, :3] - self.load_position
         goal_pos_error_norm = torch.norm(goal_pos_error, dim=-1)
 
-        # On the first step of an episode, prev_dist is undefined — clamp to current
+        # On the first step of an episode, prev_dist is undefined -- clamp to current
         # distance so the first-step progress is exactly zero (no spurious bonus).
         reset_mask = self.episode_length_buf == 0
         prev_dist = torch.where(reset_mask, goal_pos_error_norm, self._prev_load_dist)
@@ -587,10 +600,13 @@ class DirectMARLFlyrodEnv(DirectMARLEnv):
             self.cfg.action_smoothness_weight * torch.exp(-torch.norm(diff_action, dim=-1).square()) * self.step_dt
         )
 
-        # commanded body rate penalty
-        commanded_body_rates = torch.cat([self.actions[agent][:, 3:] for agent in self.cfg.possible_agents], dim=-1)
-        body_rate_penalty = torch.norm(commanded_body_rates / self._num_drones, dim=-1)
-        reward_body_rate_penalty = self.cfg.body_rate_penalty_weight * torch.exp(-body_rate_penalty) * self.step_dt
+        # commanded body rate penalty (ACCBR only)
+        if self._control_mode == "THRUST":
+            reward_body_rate_penalty = torch.zeros(self.num_envs, device=self.device)
+        else:
+            commanded_body_rates = torch.cat([self.actions[agent][:, 3:] for agent in self.cfg.possible_agents], dim=-1)
+            body_rate_penalty = torch.norm(commanded_body_rates / self._num_drones, dim=-1)
+            reward_body_rate_penalty = self.cfg.body_rate_penalty_weight * torch.exp(-body_rate_penalty) * self.step_dt
 
         # force penalty
         normalized_forces = self._forces[..., 2] / self.cfg.max_thrust_pp
@@ -638,14 +654,45 @@ class DirectMARLFlyrodEnv(DirectMARLEnv):
         falcon_low_now = (self.drone_positions[:, :, 2] < self.cfg.fly_low_threshold).any(dim=-1)
         payload_low_now = self.load_position[:, 2] < self.cfg.fly_low_threshold
         bbox_now = (self.drone_positions.abs() > self.cfg.bounding_box_threshold).any(dim=-1).any(dim=-1)
+        payload_bbox_now = (self.load_position.abs() > self.cfg.bounding_box_threshold).any(dim=-1)
+        bbox_now = bbox_now | payload_bbox_now
 
         contact_sensor = self.scene.sensors[self.cfg.sensor_cfg.name]
         net_contact_forces = contact_sensor.data.net_forces_w_history
-        illegal_contact_now = torch.any(
-            torch.max(torch.norm(net_contact_forces[:, :, self.cfg.sensor_cfg.body_ids], dim=-1), dim=1)[0]
-            > self.cfg.contact_sensor_threshold,
-            dim=1,
-        )
+        body_ids = self.cfg.sensor_cfg.body_ids
+        if isinstance(body_ids, slice):
+            start = 0 if body_ids.start is None else body_ids.start
+            stop = net_contact_forces.shape[2] if body_ids.stop is None else body_ids.stop
+            step = 1 if body_ids.step is None else body_ids.step
+            contact_ids = list(range(start, stop, step))
+        else:
+            contact_ids = list(body_ids)
+        # flatten falcon indices in case find_bodies returned nested lists
+        def _flatten_ids_local(xs):
+            out = []
+            if xs is None:
+                return out
+            # single int/string id
+            if isinstance(xs, (int, str)):
+                try:
+                    out.append(int(xs))
+                except Exception:
+                    pass
+                return out
+            for x in xs:
+                if isinstance(x, (list, tuple)):
+                    out.extend([int(i) for i in x])
+                else:
+                    out.append(int(x))
+            return out
+
+        extra_ids = _flatten_ids_local(self._payload_idx) + _flatten_ids_local(self._falcon_idx)
+        for cid in extra_ids:
+            if cid not in contact_ids:
+                contact_ids.append(cid)
+        contact_forces_selected = net_contact_forces[:, :, contact_ids]
+        max_forces = torch.max(torch.norm(contact_forces_selected, dim=-1), dim=1)[0]
+        illegal_contact_now = torch.any(max_forces > self.cfg.contact_sensor_threshold, dim=1)
 
         rpos = get_drone_rpos(self.drone_positions)
         pdist = get_drone_pdist(rpos)
@@ -727,16 +774,45 @@ class DirectMARLFlyrodEnv(DirectMARLEnv):
         # crashing into ground
         self.falcon_fly_low = (self.drone_positions[:, :, 2] < self.cfg.fly_low_threshold).any(dim=-1)
         self.payload_fly_low = self.load_position[:, 2] < self.cfg.fly_low_threshold
+        self.falcon_fly_high = (self.drone_positions[:, :, 2] > self.cfg.fly_high_threshold).any(dim=-1)
 
         # illegal contact
         contact_sensor = self.scene.sensors[self.cfg.sensor_cfg.name]
         net_contact_forces = contact_sensor.data.net_forces_w_history
-        # check if any contact force exceeds the threshold
-        self.illegal_contact = torch.any(
-            torch.max(torch.norm(net_contact_forces[:, :, self.cfg.sensor_cfg.body_ids], dim=-1), dim=1)[0]
-            > self.cfg.contact_sensor_threshold,
-            dim=1,
-        )
+        body_ids = self.cfg.sensor_cfg.body_ids
+        if isinstance(body_ids, slice):
+            start = 0 if body_ids.start is None else body_ids.start
+            stop = net_contact_forces.shape[2] if body_ids.stop is None else body_ids.stop
+            step = 1 if body_ids.step is None else body_ids.step
+            contact_ids = list(range(start, stop, step))
+        else:
+            contact_ids = list(body_ids)
+        # flatten falcon indices in case find_bodies returned nested lists
+        def _flatten_ids_local(xs):
+            out = []
+            if xs is None:
+                return out
+            # single int/string id
+            if isinstance(xs, (int, str)):
+                try:
+                    out.append(int(xs))
+                except Exception:
+                    pass
+                return out
+            for x in xs:
+                if isinstance(x, (list, tuple)):
+                    out.extend([int(i) for i in x])
+                else:
+                    out.append(int(x))
+            return out
+
+        extra_ids = _flatten_ids_local(self._payload_idx) + _flatten_ids_local(self._falcon_idx)
+        for cid in extra_ids:
+            if cid not in contact_ids:
+                contact_ids.append(cid)
+        contact_forces_selected = net_contact_forces[:, :, contact_ids]
+        max_forces = torch.max(torch.norm(contact_forces_selected, dim=-1), dim=1)[0]
+        self.illegal_contact = torch.any(max_forces > self.cfg.contact_sensor_threshold, dim=1)
 
         # angle limits
         if self._rope_terms_enabled:
@@ -778,6 +854,8 @@ class DirectMARLFlyrodEnv(DirectMARLEnv):
 
         # bounding box
         self.body_pos_outside = (self.drone_positions.abs() > self.cfg.bounding_box_threshold).any(dim=-1).any(dim=-1)
+        payload_outside = (self.load_position.abs() > self.cfg.bounding_box_threshold).any(dim=-1)
+        self.body_pos_outside = self.body_pos_outside | payload_outside
 
         # update metrics
         self._update_metrics()
@@ -786,6 +864,7 @@ class DirectMARLFlyrodEnv(DirectMARLEnv):
         terminations = (
             self.falcon_fly_low
             | self.payload_fly_low
+            | self.falcon_fly_high
             | self.illegal_contact
             | self.drone_collision
             | self.body_pos_outside
@@ -880,6 +959,9 @@ class DirectMARLFlyrodEnv(DirectMARLEnv):
         self.extras["log"]["Episode_Termination/falcon_fly_low"] = torch.count_nonzero(
             self.falcon_fly_low[env_ids_tensor]
         ).item()
+        self.extras["log"]["Episode_Termination/falcon_fly_high"] = torch.count_nonzero(
+            self.falcon_fly_high[env_ids_tensor]
+        ).item()
         self.extras["log"]["Episode_Termination/payload_fly_low"] = torch.count_nonzero(
             self.payload_fly_low[env_ids_tensor]
         ).item()
@@ -916,25 +998,16 @@ class DirectMARLFlyrodEnv(DirectMARLEnv):
 
         # reinitialise force/moment/jerk buffers to a clean hover state so that
         # the first _apply_action of the new episode starts from a known baseline
-        _hover_thrust_per_rotor = (2 * 0.6017 + 1.4) * 9.8066 / 8
+        _hover_thrust_per_rotor = (2 * 0.6017 + self.cfg.rod_mass) * 9.8066 / 8
         self._forces[env_ids_tensor] = 0.0
         self._forces[env_ids_tensor, :, 2] = _hover_thrust_per_rotor
         self._moments[env_ids_tensor] = 0.0
         self._drone_prev_acc[env_ids_tensor] = 0.0
+        self._thrust_cmds[env_ids_tensor] = _hover_thrust_per_rotor
 
         # progress reward: clear stale prev_dist; reset_mask in _get_rewards will
         # repopulate it from the new episode's first observed distance
         self._prev_load_dist[env_ids_tensor] = 0.0
-
-        # if self.common_step_counter > self.cfg.range_curriculum_steps:
-        #     self.cfg.goal_range ={
-        #     "pos_x": (-2.0, 2.0),
-        #     "pos_y": (-2.0, 2.0),
-        #     "pos_z": (0.5, 2.5),
-        #     "roll": (-math.pi/4, math.pi/4),
-        #     "pitch": (-math.pi/4, math.pi/4),
-        #     "yaw": (-math.pi, math.pi),
-        # }
 
     def _reset_target_pose(self, env_ids):
         r = torch.empty(len(env_ids), device=self.device)

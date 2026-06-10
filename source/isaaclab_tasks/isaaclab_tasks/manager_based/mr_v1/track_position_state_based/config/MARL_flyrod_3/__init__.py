@@ -8,22 +8,22 @@ import gymnasium as gym
 from . import agents
 
 gym.register(
-    id="Isaac-TrackPositionNoObstacles-Flyrod-DirectMARL-v2",
-    entry_point=f"{__name__}.direct_marl_flyrod_env_v2:DirectMARLFlyrodEnv",
+    id="Isaac-TrackPositionNoObstacles-Flyrod-DirectMARL-v3",
+    entry_point=f"{__name__}.direct_marl_flyrod_env_v3:DirectMARLFlyrodEnv",
     disable_env_checker=True,
     kwargs={
-        "env_cfg_entry_point": f"{__name__}.direct_marl_flyrod_env_cfg_v2:DirectMARLFlyrodEnvCfg",
+        "env_cfg_entry_point": f"{__name__}.direct_marl_flyrod_env_cfg_v3:DirectMARLFlyrodEnvCfg",
         "skrl_mappo_cfg_entry_point": f"{agents.__name__}:skrl_mappo_cfg.yaml",
         "skrl_ippo_cfg_entry_point": f"{agents.__name__}:skrl_ppo_cfg.yaml",
     },
 )
 
 gym.register(
-    id="Isaac-TrackPositionNoObstacles-Flyrod-DirectMARL-Play-v2",
-    entry_point=f"{__name__}.direct_marl_flyrod_env_v2:DirectMARLFlyrodEnv",
+    id="Isaac-TrackPositionNoObstacles-Flyrod-DirectMARL-Play-v3",
+    entry_point=f"{__name__}.direct_marl_flyrod_env_v3:DirectMARLFlyrodEnv",
     disable_env_checker=True,
     kwargs={
-        "env_cfg_entry_point": f"{__name__}.direct_marl_flyrod_env_cfg_v2:DirectMARLFlyrodEnvCfg_PLAY",
+        "env_cfg_entry_point": f"{__name__}.direct_marl_flyrod_env_cfg_v3:DirectMARLFlyrodEnvCfg_PLAY",
         "skrl_mappo_cfg_entry_point": f"{agents.__name__}:skrl_mappo_cfg.yaml",
         "skrl_ippo_cfg_entry_point": f"{agents.__name__}:skrl_ppo_cfg.yaml",
     },

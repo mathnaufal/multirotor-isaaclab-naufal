@@ -22,7 +22,6 @@ from isaaclab.markers.config import FRAME_MARKER_CFG
 from isaaclab.envs import ViewerCfg
 from isaaclab.utils.assets import ISAAC_NUCLEUS_DIR
 
-# Use the new aggressive multi-agent multirotor asset
 from isaaclab_assets.robots.flyrodv2_2 import FLYRODV2_2_CFG
 # from isaaclab_assets.robots.flyrod_MARL import FLYROD_MARL_CFG
 
@@ -46,8 +45,8 @@ class EventCfg:
                 "z": (1.5, 1.5),
                 "roll": (-0, 0),
                 "pitch": (-0, 0),
-                "yaw": (math.pi, math.pi),
-                # "yaw": (-math.pi, math.pi),
+                # "yaw": (math.pi, math.pi),
+                "yaw": (-math.pi, math.pi),
             },
             "velocity_range": {
                 "x": (-0.0, 0.0),
@@ -79,6 +78,7 @@ class EventCfg:
             "torque_range": (-0.0, 0.0),
         },
     )
+
 
 @configclass
 class EventCfg_PLAY(EventCfg):
@@ -114,7 +114,7 @@ class EventCfg_PLAY(EventCfg):
         mode="reset",
         params={
             "asset_cfg": SceneEntityCfg("robot", body_names=["rod_link"]),
-            "mass_distribution_params": (1.0, 1.0),  # scale by 1.0 → no change
+            "mass_distribution_params": (1.0, 1.0),  # scale by 1.0 -> no change
             "operation": "scale",
         },
     )
@@ -204,44 +204,49 @@ class MySceneCfg(InteractiveSceneCfg):
     # LiDAR disabled by request.
     # Keep these definitions commented for quick re-enable later if needed.
     # lidar_falcon1: MultiMeshRayCasterCfg = MultiMeshRayCasterCfg(
-        prim_path="{ENV_REGEX_NS}/Flyrodv2/Falcon1_base_link",
-        update_period=0.0,
-        offset=MultiMeshRayCasterCfg.OffsetCfg(pos=(0.0, 0.0, 0.0), rot=(1.0, 0.0, 0.0, 0.0)),
-        mesh_prim_paths=["{ENV_REGEX_NS}/Wall_.*"],
-        ray_alignment="yaw",
-        pattern_cfg=patterns.LidarPatternCfg(
-            channels=1,
-            vertical_fov_range=(0.0, 0.0),
-            horizontal_fov_range=(-90.0, 90.0),
-            horizontal_res=15.0,
-        ),
-        max_distance=10.0,
-        debug_vis=False,
-    )
+    #     prim_path="{ENV_REGEX_NS}/Flyrodv2/Falcon1_base_link",
+    #     update_period=0.0,
+    #     offset=MultiMeshRayCasterCfg.OffsetCfg(pos=(0.0, 0.0, 0.0), rot=(1.0, 0.0, 0.0, 0.0)),
+    #     mesh_prim_paths=["{ENV_REGEX_NS}/Wall_.*"],
+    #     ray_alignment="yaw",
+    #     pattern_cfg=patterns.LidarPatternCfg(
+    #         channels=1,
+    #         vertical_fov_range=(0.0, 0.0),
+    #         horizontal_fov_range=(-90.0, 90.0),
+    #         horizontal_res=15.0,
+    #     ),
+    #     max_distance=10.0,
+    #     debug_vis=False,
+    # )
 
-    lidar_falcon2 = MultiMeshRayCasterCfg(
-        prim_path="{ENV_REGEX_NS}/Flyrodv2/Falcon2_base_link",
-        update_period=0.0,
-        offset=MultiMeshRayCasterCfg.OffsetCfg(pos=(0.0, 0.0, 0.0), rot=(1.0, 0.0, 0.0, 0.0)),
-        mesh_prim_paths=["{ENV_REGEX_NS}/Wall_.*"],
-        ray_alignment="yaw",
-        pattern_cfg=patterns.LidarPatternCfg(
-            channels=1,
-            vertical_fov_range=(0.0, 0.0),
-            horizontal_fov_range=(-90.0, 90.0),
-            horizontal_res=15.0,
-        ),
-        max_distance=10.0,
-        debug_vis=False,
-    )
+    # lidar_falcon2: MultiMeshRayCasterCfg = MultiMeshRayCasterCfg(
+    #     prim_path="{ENV_REGEX_NS}/Flyrodv2/Falcon2_base_link",
+    #     update_period=0.0,
+    #     offset=MultiMeshRayCasterCfg.OffsetCfg(pos=(0.0, 0.0, 0.0), rot=(1.0, 0.0, 0.0, 0.0)),
+    #     mesh_prim_paths=["{ENV_REGEX_NS}/Wall_.*"],
+    #     ray_alignment="yaw",
+    #     pattern_cfg=patterns.LidarPatternCfg(
+    #         channels=1,
+    #         vertical_fov_range=(0.0, 0.0),
+    #         horizontal_fov_range=(-90.0, 90.0),
+    #         horizontal_res=15.0,
+    #     ),
+    #     max_distance=10.0,
+    #     debug_vis=False,
+    # )
 
 
 @configclass
 class DirectMARLFlyrodEnvCfg(DirectMARLEnvCfg):
-    """Direct MARL config for flyrodv2 using ACCBR control, matching marl_hover architecture."""
+    """Direct MARL config for flyrodv2 using thrust-level actions."""
+
+    # Rod mass [kg] -- configurable for dynamic adjustment; also seeds hover-thrust bootstrap.
+    rod_mass: float = 1.4
+    # Rod center of gravity offset range [m] -- randomized each episode
+    rod_com_range: tuple[float, float] = (-0.05, 0.05)
 
     # control mode
-    control_mode = "ACCBR"  # ACCBR or geometric
+    control_mode = "THRUST"  # THRUST, ACCBR, or geometric
 
     # env
     decimation = 3
@@ -254,27 +259,37 @@ class DirectMARLFlyrodEnvCfg(DirectMARLEnvCfg):
     possible_agents = ["falcon1", "falcon2"]
     num_drones = len(possible_agents)
 
+    # LiDAR is disabled for the checkpoint-compatible observation layout.
+    # Set this to 13 and re-enable the LiDAR branch if you retrain with ray features.
     num_lidar_rays = 0
 
-    if control_mode == "ACCBR":
+    if control_mode == "THRUST":
+        action_dim_thrust = 4  # per-drone rotor thrust commands
+        action_spaces = {"falcon1": action_dim_thrust, "falcon2": action_dim_thrust}
+        if partial_obs:
+            obs_dim_thrust = 39 * history_len
+        else:
+            obs_dim_thrust = 66
+        observation_spaces = {
+            "falcon1": obs_dim_thrust,
+            "falcon2": obs_dim_thrust,
+        }
+        # state: rod(3+9+3+3=18) + 2x falcon(2x(3+9+3+3)=36) + goal(3) = 57
+        state_space = 57
+    elif control_mode == "ACCBR":
         action_dim_accbr = 5  # [lin_acc_x, lin_acc_y, lin_acc_z, roll_rate, pitch_rate]
         action_spaces = {"falcon1": action_dim_accbr, "falcon2": action_dim_accbr}
         if partial_obs:
-            # load_pos(3)+load_mat(9)+one_hot(3)+drone_pos(3)+drone_rot(9)+drone_vel(3)+drone_ang_vel(3)+goal_pos_err(3)+drone_to_goal(3)=39.
             obs_dim_accbr = 39 * history_len
         else:
-            # load_pos(3)+load_mat(9)+load_vel(3)+load_ang_vel(3)+one_hot(3)+
-            # drone_pos_all(6)+drone_rot_all(18)+drone_vel_all(6)+drone_ang_vel_all(6)+
-            # goal_pos_err(3)+drone_to_goal_all(6)=66
             obs_dim_accbr = 66
         observation_spaces = {
             "falcon1": obs_dim_accbr,
             "falcon2": obs_dim_accbr,
         }
-        # state: rod(3+9+3+3=18) + 2×falcon(2×(3+9+3+3)=36) + goal(3) = 57
         state_space = 57
 
-    # simulation — 300 Hz physics, 100 Hz policy
+    # simulation -- 300 Hz physics, 100 Hz policy
     sim: SimulationCfg = SimulationCfg(
         dt=1.0 / 300.0,
         render_interval=decimation,
@@ -316,8 +331,8 @@ class DirectMARLFlyrodEnvCfg(DirectMARLEnvCfg):
     payload_name = "rod_link"
     # rope/cable name and properties
     rope_name = "rope_.*_link"
-    rope_stiffness: float = 1000.0  # [N/m] — spring stiffness of cable joints
-    rope_damping: float = 50.0  # [N*s/m] — damping of cable joints
+    rope_stiffness: float = 1000.0  # [N/m] -- spring stiffness of cable joints
+    rope_damping: float = 50.0  # [N*s/m] -- damping of cable joints
     cable_angle_limits_drone = 0.0  # cos(angle) limits
     cable_angle_limits_payload = -math.sqrt(2) / 2  # cos(angle) limits
     cable_collision_threshold = 0.2
@@ -325,13 +340,13 @@ class DirectMARLFlyrodEnvCfg(DirectMARLEnvCfg):
 
     # low level control
     low_level_decimation: int = 1
+    thrust_min: float = 0.1
+    thrust_max: float = 10.0
     max_thrust_pp: float = 10.0  # matches flyrod allocation matrix thrust_range max
 
-    # action-to-physics scaling: affine map from raw policy outputs to physical setpoints
-    # policy outputs are unbounded Gaussian (clip_actions=false); these multipliers convert
-    # them into physically meaningful units so the controller receives reasonable commands.
-    acc_scale: float = 1.5 * 9.8066  # [m/s²] — output ±1 → ±1.5 g lin_acc command
-    body_rate_scale: float = 2.0 * math.pi  # [rad/s] — output ±1 → ±2π rad/s roll/pitch rate
+    # action-to-physics scaling for ACCBR modes
+    acc_scale: float = 1.5 * 9.8066  # [m/s^2] -- output +-1 -> +-1.5 g lin_acc command
+    body_rate_scale: float = 2.0 * math.pi  # [rad/s] -- output +-1 -> +-2pi rad/s roll/pitch rate
 
     # rewards
     # Task reward weights are raised well above regularizers so that progress toward the
@@ -340,7 +355,7 @@ class DirectMARLFlyrodEnvCfg(DirectMARLEnvCfg):
     progress_weight = 25.0
     distance_weight = 25.0
     distance_std = 1.5
-    upright_orient_weight = 0.5 # 2.0
+    upright_orient_weight = 2.0
     action_smoothness_weight = 0.0
     body_rate_penalty_weight = 0.0
     force_penalty_weight = 0.0
@@ -373,14 +388,14 @@ class DirectMARLFlyrodEnvCfg(DirectMARLEnvCfg):
 
     make_quat_unique_command = False
 
-    # ── sim-to-real: observation noise ──────────────────────────────────────
+    # -- sim-to-real: observation noise --
     # Mild additive Gaussian noise applied only to the observation tensors;
     # reward and termination computations always use the clean physics buffers.
     # Gap 1: position + velocity noise (IMU drift / MOCAP jitter)
     position_noise_std: float = 0.0
     velocity_noise_std: float = 0.0
     ang_vel_noise_std: float = 0.0
-    # Gap 2: rotation matrix noise — proxy for 6-DOF pose estimation error on payload
+    # Gap 2: rotation matrix noise -- proxy for 6-DOF pose estimation error on payload
     orient_noise_std: float = 0.0
 
     # debug visualization
@@ -411,7 +426,7 @@ class DirectMARLFlyrodEnvCfg_PLAY(DirectMARLFlyrodEnvCfg):
 
     scene: MySceneCfg = MySceneCfg(num_envs=1, env_spacing=2.5, replicate_physics=True)
 
-    # No observation noise during evaluation — clean rollouts for analysis
+    # No observation noise during evaluation -- clean rollouts for analysis
     position_noise_std: float = 0.0
     velocity_noise_std: float = 0.0
     orient_noise_std: float = 0.0

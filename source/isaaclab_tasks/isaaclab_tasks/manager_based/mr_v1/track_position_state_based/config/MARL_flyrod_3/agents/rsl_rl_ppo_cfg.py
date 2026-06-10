@@ -9,16 +9,16 @@ from isaaclab_rl.rsl_rl import RslRlOnPolicyRunnerCfg, RslRlPpoActorCriticCfg, R
 
 
 @configclass
-class FlyrodV2TrackPositionPPORunnerCfg(RslRlOnPolicyRunnerCfg):
+class TrackPositionNoObstaclesEnvPPORunnerCfg(RslRlOnPolicyRunnerCfg):
     num_steps_per_env = 24
     max_iterations = 1500
     save_interval = 50
-    experiment_name = "flyrodv2_track_position_state_based"
+    experiment_name = "flyrod_MARL_track_position_state_based"
     empirical_normalization = False
     policy = RslRlPpoActorCriticCfg(
         init_noise_std=0.5,
-        actor_hidden_dims=[512, 256, 128],
-        critic_hidden_dims=[512, 256, 128],
+        actor_hidden_dims=[256, 128, 64],
+        critic_hidden_dims=[256, 128, 64],
         activation="elu",
     )
     algorithm = RslRlPpoAlgorithmCfg(

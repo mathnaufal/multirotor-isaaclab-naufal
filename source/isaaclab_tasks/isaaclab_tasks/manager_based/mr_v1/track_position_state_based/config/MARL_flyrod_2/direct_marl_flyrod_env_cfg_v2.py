@@ -22,7 +22,7 @@ from isaaclab.markers.config import FRAME_MARKER_CFG
 from isaaclab.envs import ViewerCfg
 from isaaclab.utils.assets import ISAAC_NUCLEUS_DIR
 
-from isaaclab_assets.robots.flyrodv2 import FLYRODV2_CFG
+from isaaclab_assets.robots.flyrodv2_2 import FLYRODV2_2_CFG
 # from isaaclab_assets.robots.flyrod_MARL import FLYROD_MARL_CFG
 
 
@@ -41,45 +41,31 @@ class EventCfg:
         params={
             "pose_range": {
                 "x": (-6.0, -6.0),
-                "y": (-1.0, 1.0),
+                "y": (-6.0, 6.0),
                 "z": (1.5, 1.5),
                 "roll": (-0, 0),
                 "pitch": (-0, 0),
-                "yaw": (math.pi, math.pi),
-                # "yaw": (-math.pi, math.pi),
+                # "yaw": (math.pi, math.pi),
+                "yaw": (-math.pi, math.pi),
             },
             "velocity_range": {
-                # Gap 4: small initial velocity spread to simulate motor spin-up variance
-                "x": (-0.1, 0.1),
-                "y": (-0.1, 0.1),
-                "z": (-0.05, 0.05),
-                "roll": (-0.05, 0.05),
-                "pitch": (-0.05, 0.05),
-                "yaw": (-0.05, 0.05),
+                "x": (-0.0, 0.0),
+                "y": (-0.0, 0.0),
+                "z": (-0.0, 0.0),
+                "roll": (-0.0, 0.0),
+                "pitch": (-0.0, 0.0),
+                "yaw": (-0.0, 0.0),
             },
         },
     )
 
     randomize_mass = EventTerm(
         func=mdp.randomize_rigid_body_mass,  # type: ignore[arg-type]
-        mode="reset",
+        mode="startup",
         params={
             "asset_cfg": SceneEntityCfg("robot", body_names=["rod_link"]),
-            "mass_distribution_params": (1.0, 2.0),  # 50% to 200% of default 1.4 kg
+            "mass_distribution_params": (0.5, 0.6),
             "operation": "abs",
-        },
-    )
-
-    randomize_com = EventTerm(
-        func=mdp.randomize_rigid_body_com,  # type: ignore[arg-type]
-        mode="reset",
-        params={
-            "asset_cfg": SceneEntityCfg("robot", body_names=["rod_link"]),
-            "com_range": {
-                "x": (-0.05, 0.05),  # along rod length (parallel)
-                "y": (0.0, 0.0),     # no randomization (perpendicular)
-                "z": (0.0, 0.0),     # no randomization (perpendicular)
-            },
         },
     )
 
@@ -104,7 +90,7 @@ class EventCfg_PLAY(EventCfg):
         params={
             "pose_range": {
                 "x": (-6.0, -6.0),
-                "y": (-1.0, 1.0),
+                "y": (-6.0, 6.0),
                 "z": (1.5, 1.5),
                 "roll": (-0, 0),
                 "pitch": (-0, 0),
@@ -128,17 +114,8 @@ class EventCfg_PLAY(EventCfg):
         mode="reset",
         params={
             "asset_cfg": SceneEntityCfg("robot", body_names=["rod_link"]),
-            "mass_distribution_params": (1.0, 1.0),  # scale by 1.0 → no change
+            "mass_distribution_params": (1.0, 1.0),  # scale by 1.0 -> no change
             "operation": "scale",
-        },
-    )
-
-    randomize_com = EventTerm(
-        func=mdp.randomize_rigid_body_com,  # type: ignore[arg-type]
-        mode="reset",
-        params={
-            "asset_cfg": SceneEntityCfg("robot", body_names=["rod_link"]),
-            "com_range": {"x": (0.0, 0.0), "y": (0.0, 0.0), "z": (0.0, 0.0)},
         },
     )
 
@@ -194,7 +171,7 @@ class MySceneCfg(InteractiveSceneCfg):
     floor = AssetBaseCfg(
         prim_path="{ENV_REGEX_NS}/Wall_Floor",
         spawn=sim_utils.CuboidCfg(
-            size=(20.0, 24.0, 0.1),
+            size=(20.0, 22.0, 0.1),
             rigid_props=sim_utils.RigidBodyPropertiesCfg(kinematic_enabled=True),
             collision_props=sim_utils.CollisionPropertiesCfg(),
             visual_material=sim_utils.PreviewSurfaceCfg(diffuse_color=(0.35, 0.35, 0.35)),
@@ -210,7 +187,7 @@ class MySceneCfg(InteractiveSceneCfg):
             collision_props=sim_utils.CollisionPropertiesCfg(),
             visual_material=sim_utils.PreviewSurfaceCfg(diffuse_color=(0.5, 0.5, 0.5)),
         ),
-        init_state=AssetBaseCfg.InitialStateCfg(pos=(2.0, -12.0, 5.0)),
+        init_state=AssetBaseCfg.InitialStateCfg(pos=(2.0, -11.0, 5.0)),
     )
 
     wall_env_right = AssetBaseCfg(
@@ -221,7 +198,7 @@ class MySceneCfg(InteractiveSceneCfg):
             collision_props=sim_utils.CollisionPropertiesCfg(),
             visual_material=sim_utils.PreviewSurfaceCfg(diffuse_color=(0.5, 0.5, 0.5)),
         ),
-        init_state=AssetBaseCfg.InitialStateCfg(pos=(2.0, 12.0, 5.0)),
+        init_state=AssetBaseCfg.InitialStateCfg(pos=(2.0, 11.0, 5.0)),
     )
 
     # LiDAR disabled by request.
@@ -261,15 +238,15 @@ class MySceneCfg(InteractiveSceneCfg):
 
 @configclass
 class DirectMARLFlyrodEnvCfg(DirectMARLEnvCfg):
-    """Direct MARL config for flyrodv2 using ACCBR control, matching marl_hover architecture."""
+    """Direct MARL config for flyrodv2 using thrust-level actions."""
 
-    # Rod mass [kg] — configurable for dynamic adjustment
+    # Rod mass [kg] -- configurable for dynamic adjustment; also seeds hover-thrust bootstrap.
     rod_mass: float = 1.4
-    # Rod center of gravity offset range [m] — randomized each episode
+    # Rod center of gravity offset range [m] -- randomized each episode
     rod_com_range: tuple[float, float] = (-0.05, 0.05)
 
     # control mode
-    control_mode = "ACCBR"  # ACCBR or geometric
+    control_mode = "THRUST"  # THRUST, ACCBR, or geometric
 
     # env
     decimation = 3
@@ -286,25 +263,33 @@ class DirectMARLFlyrodEnvCfg(DirectMARLEnvCfg):
     # Set this to 13 and re-enable the LiDAR branch if you retrain with ray features.
     num_lidar_rays = 0
 
-    if control_mode == "ACCBR":
+    if control_mode == "THRUST":
+        action_dim_thrust = 4  # per-drone rotor thrust commands
+        action_spaces = {"falcon1": action_dim_thrust, "falcon2": action_dim_thrust}
+        if partial_obs:
+            obs_dim_thrust = 39 * history_len
+        else:
+            obs_dim_thrust = 66
+        observation_spaces = {
+            "falcon1": obs_dim_thrust,
+            "falcon2": obs_dim_thrust,
+        }
+        # state: rod(3+9+3+3=18) + 2x falcon(2x(3+9+3+3)=36) + goal(3) = 57
+        state_space = 57
+    elif control_mode == "ACCBR":
         action_dim_accbr = 5  # [lin_acc_x, lin_acc_y, lin_acc_z, roll_rate, pitch_rate]
         action_spaces = {"falcon1": action_dim_accbr, "falcon2": action_dim_accbr}
         if partial_obs:
-            # load_pos(3)+load_mat(9)+one_hot(3)+drone_pos(3)+drone_rot(9)+drone_vel(3)+drone_ang_vel(3)+goal_pos_err(3)+drone_to_goal(3)=39.
             obs_dim_accbr = 39 * history_len
         else:
-            # load_pos(3)+load_mat(9)+load_vel(3)+load_ang_vel(3)+one_hot(3)+
-            # drone_pos_all(6)+drone_rot_all(18)+drone_vel_all(6)+drone_ang_vel_all(6)+
-            # goal_pos_err(3)+drone_to_goal_all(6)=66
             obs_dim_accbr = 66
         observation_spaces = {
             "falcon1": obs_dim_accbr,
             "falcon2": obs_dim_accbr,
         }
-        # state: rod(3+9+3+3=18) + 2×falcon(2×(3+9+3+3)=36) + goal(3) = 57
         state_space = 57
 
-    # simulation — 300 Hz physics, 100 Hz policy
+    # simulation -- 300 Hz physics, 100 Hz policy
     sim: SimulationCfg = SimulationCfg(
         dt=1.0 / 300.0,
         render_interval=decimation,
@@ -318,8 +303,8 @@ class DirectMARLFlyrodEnvCfg(DirectMARLEnvCfg):
         # physx=PhysxCfg(gpu_max_rigid_patch_count=10 * 2**15),
     )
 
-    # robot (match flyrodv2 asset configuration style)
-    robot_cfg = FLYRODV2_CFG.replace(prim_path="/World/envs/env_.*/Flyrodv2")  # type: ignore[attr-defined]
+    # robot (use new flyrodv2_2 multirotor-style asset)
+    robot_cfg = FLYRODV2_2_CFG.replace(prim_path="/World/envs/env_.*/Flyrodv2")  # type: ignore[attr-defined]
     robot_cfg.spawn.activate_contact_sensors = True
 
     # contact sensor
@@ -329,13 +314,13 @@ class DirectMARLFlyrodEnvCfg(DirectMARLEnvCfg):
         history_length=3,
         track_air_time=False,
         debug_vis=False,
-        filter_prim_paths_expr=["{ENV_REGEX_NS}/Wall_.*"],
+        filter_prim_paths_expr=["/World/envs/env_.*/Wall_.*"],
     )
     sensor_cfg = SceneEntityCfg("contact_forces", body_names=".*")
     contact_sensor_threshold = 0.1
 
     # scene
-    scene: MySceneCfg = MySceneCfg(num_envs=4096, env_spacing=25.0, replicate_physics=True)
+    scene: MySceneCfg = MySceneCfg(num_envs=2048, env_spacing=25.0, replicate_physics=True)
 
     # body name patterns for find_bodies
     # Match only the actual base-link bodies, not the `_inertia` collision bodies.
@@ -346,8 +331,8 @@ class DirectMARLFlyrodEnvCfg(DirectMARLEnvCfg):
     payload_name = "rod_link"
     # rope/cable name and properties
     rope_name = "rope_.*_link"
-    rope_stiffness: float = 1000.0  # [N/m] — spring stiffness of cable joints
-    rope_damping: float = 50.0  # [N*s/m] — damping of cable joints
+    rope_stiffness: float = 1000.0  # [N/m] -- spring stiffness of cable joints
+    rope_damping: float = 50.0  # [N*s/m] -- damping of cable joints
     cable_angle_limits_drone = 0.0  # cos(angle) limits
     cable_angle_limits_payload = -math.sqrt(2) / 2  # cos(angle) limits
     cable_collision_threshold = 0.2
@@ -355,13 +340,13 @@ class DirectMARLFlyrodEnvCfg(DirectMARLEnvCfg):
 
     # low level control
     low_level_decimation: int = 1
+    thrust_min: float = 0.1
+    thrust_max: float = 10.0
     max_thrust_pp: float = 10.0  # matches flyrod allocation matrix thrust_range max
 
-    # action-to-physics scaling: affine map from raw policy outputs to physical setpoints
-    # policy outputs are unbounded Gaussian (clip_actions=false); these multipliers convert
-    # them into physically meaningful units so the controller receives reasonable commands.
-    acc_scale: float = 9.8066  # [m/s²] — 1 g; output ±1 → ±9.8 m/s² lin_acc command
-    body_rate_scale: float = math.pi  # [rad/s] — output ±1 → ±π rad/s roll/pitch rate
+    # action-to-physics scaling for ACCBR modes
+    acc_scale: float = 1.5 * 9.8066  # [m/s^2] -- output +-1 -> +-1.5 g lin_acc command
+    body_rate_scale: float = 2.0 * math.pi  # [rad/s] -- output +-1 -> +-2pi rad/s roll/pitch rate
 
     # rewards
     # Task reward weights are raised well above regularizers so that progress toward the
@@ -403,15 +388,15 @@ class DirectMARLFlyrodEnvCfg(DirectMARLEnvCfg):
 
     make_quat_unique_command = False
 
-    # ── sim-to-real: observation noise ────────────────────────────────────────
+    # -- sim-to-real: observation noise --
     # Mild additive Gaussian noise applied only to the observation tensors;
     # reward and termination computations always use the clean physics buffers.
     # Gap 1: position + velocity noise (IMU drift / MOCAP jitter)
-    position_noise_std: float = 0.01   # [m]   ~1 cm, typical MOCAP accuracy
-    velocity_noise_std: float = 0.03   # [m/s] ~3 cm/s, differentiated position noise
-    ang_vel_noise_std: float = 0.02    # [rad/s] gyro bias
-    # Gap 2: rotation matrix noise — proxy for 6-DOF pose estimation error on payload
-    orient_noise_std: float = 0.005    # per-element perturbation; small to keep R ≈ SO(3)
+    position_noise_std: float = 0.0
+    velocity_noise_std: float = 0.0
+    ang_vel_noise_std: float = 0.0
+    # Gap 2: rotation matrix noise -- proxy for 6-DOF pose estimation error on payload
+    orient_noise_std: float = 0.0
 
     # debug visualization
     debug_vis: bool = True
@@ -427,6 +412,7 @@ class DirectMARLFlyrodEnvCfg(DirectMARLEnvCfg):
     # terminations
     fly_low_threshold: float = 0.0
     drone_collision_threshold: float = 0.6
+    fly_high_threshold: float = 10.0
     bounding_box_threshold: float = 20.0
     contact_sensor_threshold: float = 0.1
     # rope-angle / cable-collision terminations disabled during exploration
@@ -441,7 +427,7 @@ class DirectMARLFlyrodEnvCfg_PLAY(DirectMARLFlyrodEnvCfg):
 
     scene: MySceneCfg = MySceneCfg(num_envs=1, env_spacing=2.5, replicate_physics=True)
 
-    # No observation noise during evaluation — clean rollouts for analysis
+    # No observation noise during evaluation -- clean rollouts for analysis
     position_noise_std: float = 0.0
     velocity_noise_std: float = 0.0
     orient_noise_std: float = 0.0
@@ -452,7 +438,7 @@ class DirectMARLFlyrodEnvCfg_PLAY(DirectMARLFlyrodEnvCfg):
 
     # Viewer option for PLAY: choose camera focused on the robot or an upper-right overview
     # Options: "default", "robot", "upper_right"
-    viewer_option: str = "robot"
+    viewer_option: str = "upper_right"
     if viewer_option == "robot":
         viewer: ViewerCfg = ViewerCfg(
             origin_type="asset_root",

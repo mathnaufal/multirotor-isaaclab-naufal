@@ -32,6 +32,8 @@ _REPO_ROOT = Path(__file__).resolve().parents[8]
 _FLYROD_USD_PATH = _REPO_ROOT / "source" / "isaaclab_tasks" / "isaaclab_tasks" / "manager_based" / "mr_v1" / "usd_creations" / "flyrod" / "flyrod.usd"
 
 FLYROD_THRUSTER_CFG = ThrusterCfg(
+    # integration timestep used by this manager-based env (100 Hz control loop -> 0.01s)
+    dt=0.01,
     thrust_range=(0.1, 10.0),
     thrust_const_range=(9.26312e-06, 1.826312e-05),
     tau_inc_range=(0.05, 0.08),
