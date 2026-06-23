@@ -1,4 +1,4 @@
-# Deep Multi-Agent Reinforcement Learning for Cooperative Multi-UAV Payload Transportation
+[TA2_Naufal (Draft).pdf](https://github.com/user-attachments/files/29236517/TA2_Naufal.Draft.pdf)# Deep Multi-Agent Reinforcement Learning for Cooperative Multi-UAV Payload Transportation
 
 ## Overview
 
@@ -6,9 +6,10 @@ This repository contains the implementation of my undergraduate thesis at Instit
 
 ## Environment
 
-![Environment in Isaac Lab](env_isaaclab.png)
-
-![Top-View 2D Environment Representation](2Denv_1.png)
+<p align="left">
+  <img src="2Denv_1.png" width="27.65%">
+  <img src="env_isaaclab.png" width="45%">
+</p>
 
 ## Results
 
@@ -22,11 +23,21 @@ https://github.com/user-attachments/assets/33ab060a-0348-4eef-bd25-0f24d86ece60
 
 ### Trajectory Plots
 
-![Mid-Training 400K Episodes (Upper row) and Post-Training 1.5M Episodes (Lower row) Representation](results/figures/2dtrajectory.png)
+<p align="left">
+  <img src="results/figures/2dtrajectory.png" width="50%">
+</p>
 
 ### Learning Curve
 
-![Total Reward Graph](results/figures/learningcurve_1.png)
+<p align="left">
+  <img src="results/figures/learningcurve_1.png" width="50%">
+</p>
+
+### Undergraduate Thesis Current Draft 
+
+Last updated: (06/23/2026)
+
+[TA2_Naufal (Draft).pdf](https://github.com/user-attachments/files/29236521/TA2_Naufal.Draft.pdf)
 
 ## Comments
 
