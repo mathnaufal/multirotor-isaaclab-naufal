@@ -41,7 +41,7 @@ class EventCfg:
         params={
             "pose_range": {
                 "x": (-6.0, -6.0),
-                "y": (-1.0, 1.0),
+                "y": (-6.0, 6.0),
                 "z": (1.5, 1.5),
                 "roll": (-0, 0),
                 "pitch": (-0, 0),
@@ -90,7 +90,7 @@ class EventCfg_PLAY(EventCfg):
         params={
             "pose_range": {
                 "x": (-6.0, -6.0),
-                "y": (-1.0, 1.0),
+                "y": (4.5, 4.5),
                 "z": (1.5, 1.5),
                 "roll": (-0, 0),
                 "pitch": (-0, 0),
@@ -412,6 +412,7 @@ class DirectMARLFlyrodEnvCfg(DirectMARLEnvCfg):
     # terminations
     fly_low_threshold: float = 0.0
     drone_collision_threshold: float = 0.6
+    fly_high_threshold: float = 10.0
     bounding_box_threshold: float = 20.0
     contact_sensor_threshold: float = 0.1
     # rope-angle / cable-collision terminations disabled during exploration

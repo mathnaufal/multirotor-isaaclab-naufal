@@ -203,7 +203,7 @@ class MySceneCfg(InteractiveSceneCfg):
 
     # LiDAR disabled by request.
     # Keep these definitions commented for quick re-enable later if needed.
-    # lidar_falcon1: MultiMeshRayCasterCfg = MultiMeshRayCasterCfg(
+    lidar_falcon1: MultiMeshRayCasterCfg = MultiMeshRayCasterCfg(
         prim_path="{ENV_REGEX_NS}/Flyrodv2/Falcon1_base_link",
         update_period=0.0,
         offset=MultiMeshRayCasterCfg.OffsetCfg(pos=(0.0, 0.0, 0.0), rot=(1.0, 0.0, 0.0, 0.0)),

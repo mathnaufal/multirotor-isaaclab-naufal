@@ -194,6 +194,7 @@ class DirectMARLFlyrodEnv(DirectMARLEnv):
                 "crash_penalty",
                 "cross_track_funnel",
                 "time_penalty",
+                "wall_penalty",
             ]
         }
 
@@ -437,10 +438,25 @@ class DirectMARLFlyrodEnv(DirectMARLEnv):
         goal_error_obs = self.pose_command_w[:, :3] - load_pos_obs
         drone_to_goal_obs = self.pose_command_w[:, :3].unsqueeze(1) - drone_pos_obs
 
-        lidar_f1_obs = ()
-        lidar_f2_obs = ()
+# ---------------------------------------------------------
+        # FETCH AND NORMALIZE LIDAR DATA HERE
+        # ---------------------------------------------------------
+        # Fetch the RayCaster data containers
+        lidar_f1_data = self.scene.sensors["lidar_falcon1"].data
+        lidar_f2_data = self.scene.sensors["lidar_falcon2"].data
 
-        # LiDAR observations are disabled for this variant.
+        # Manually calculate Euclidean distance: norm(ray_hits_w - pos_w)
+        # ray_hits_w is (num_envs, num_rays, 3) and pos_w is (num_envs, 3)
+        dist_f1 = torch.norm(lidar_f1_data.ray_hits_w - lidar_f1_data.pos_w.unsqueeze(1), dim=-1)
+        dist_f2 = torch.norm(lidar_f2_data.ray_hits_w - lidar_f2_data.pos_w.unsqueeze(1), dim=-1)
+
+        # Un-hit rays return 'inf'. Replace them with your max distance (10.0)
+        dist_f1 = torch.nan_to_num(dist_f1, posinf=10.0, neginf=10.0, nan=10.0)
+        dist_f2 = torch.nan_to_num(dist_f2, posinf=10.0, neginf=10.0, nan=10.0)
+
+        # Normalize distances to [0, 1] for the neural network
+        lidar_f1_obs = torch.clamp(dist_f1 / 10.0, 0.0, 1.0)
+        lidar_f2_obs = torch.clamp(dist_f2 / 10.0, 0.0, 1.0)
 
         if self.cfg.partial_obs:
             obs_falcon1_t = torch.cat(
@@ -455,7 +471,7 @@ class DirectMARLFlyrodEnv(DirectMARLEnv):
                     drone_ang_vel_obs[:, 0].view(self.num_envs, -1),
                     goal_error_obs,
                     drone_to_goal_obs[:, 0],
-                    *lidar_f1_obs,
+                    lidar_f1_obs,
                 ),
                 dim=-1,
             )
@@ -474,7 +490,7 @@ class DirectMARLFlyrodEnv(DirectMARLEnv):
                     drone_ang_vel_obs[:, 1].view(self.num_envs, -1),
                     goal_error_obs,
                     drone_to_goal_obs[:, 1],
-                    *lidar_f2_obs,
+                    lidar_f2_obs,
                 ),
                 dim=-1,
             )
@@ -498,7 +514,7 @@ class DirectMARLFlyrodEnv(DirectMARLEnv):
                     drone_ang_vel_obs.view(self.num_envs, -1),
                     goal_error_obs,
                     drone_to_goal_obs.view(self.num_envs, -1),
-                    *lidar_f1_obs,
+                    lidar_f1_obs,
                 ),
                 dim=-1,
             )
@@ -517,7 +533,7 @@ class DirectMARLFlyrodEnv(DirectMARLEnv):
                     drone_ang_vel_obs.view(self.num_envs, -1),
                     goal_error_obs,
                     drone_to_goal_obs.view(self.num_envs, -1),
-                    *lidar_f2_obs,
+                    lidar_f2_obs,
                 ),
                 dim=-1,
             )
@@ -644,6 +660,32 @@ class DirectMARLFlyrodEnv(DirectMARLEnv):
         cross_track_error = torch.abs(self.load_position[:, 1])
         reward_funnel = -self.cfg.cross_track_weight * cross_track_error * self.step_dt
 
+        # ---------------------------------------------------------
+        # NEW: WALL PROXIMITY PENALTY
+        # ---------------------------------------------------------
+        # 1. Fetch the RayCaster data containers directly in the rewards function
+        lidar_f1_data = self.scene.sensors["lidar_falcon1"].data
+        lidar_f2_data = self.scene.sensors["lidar_falcon2"].data
+
+        # 2. Manually calculate Euclidean distance: norm(ray_hits_w - pos_w)
+        dist_f1_rew = torch.norm(lidar_f1_data.ray_hits_w - lidar_f1_data.pos_w.unsqueeze(1), dim=-1)
+        dist_f2_rew = torch.norm(lidar_f2_data.ray_hits_w - lidar_f2_data.pos_w.unsqueeze(1), dim=-1)
+
+        # 3. Un-hit rays return 'inf'. Replace them with max distance (10.0)
+        dist_f1_rew = torch.nan_to_num(dist_f1_rew, posinf=10.0, neginf=10.0, nan=10.0)
+        dist_f2_rew = torch.nan_to_num(dist_f2_rew, posinf=10.0, neginf=10.0, nan=10.0)
+
+        # 4. Find the minimum distance to a wall for each drone
+        min_dist_f1, _ = torch.min(dist_f1_rew, dim=-1)
+        min_dist_f2, _ = torch.min(dist_f2_rew, dim=-1)
+        
+        # 5. Calculate how far they are inside the "danger zone" threshold
+        penalty_f1 = torch.clamp(self.cfg.wall_distance_threshold - min_dist_f1, min=0.0)
+        penalty_f2 = torch.clamp(self.cfg.wall_distance_threshold - min_dist_f2, min=0.0)
+        
+        # 6. Apply the negative reward
+        reward_wall_penalty = -self.cfg.wall_penalty_weight * (penalty_f1 + penalty_f2) * self.step_dt
+
         # constant time penalty: makes hovering costly so the agent actively seeks the goal
         reward_time_penalty = torch.full(
             (self.num_envs,), -self.cfg.time_penalty_weight * self.step_dt, device=self.device
@@ -739,6 +781,7 @@ class DirectMARLFlyrodEnv(DirectMARLEnv):
             "crash_penalty": reward_crash,
             "cross_track_funnel": reward_funnel,
             "time_penalty": reward_time_penalty,
+            "wall_penalty": reward_wall_penalty,
         }
 
         # Logging
@@ -758,6 +801,7 @@ class DirectMARLFlyrodEnv(DirectMARLEnv):
             + reward_crash
             + reward_funnel
             + reward_time_penalty
+            + reward_wall_penalty
         )
 
         return {str(agent): shared_rewards for agent in self.cfg.possible_agents}
@@ -1028,6 +1072,16 @@ class DirectMARLFlyrodEnv(DirectMARLEnv):
         self.metrics["position_error"] = torch.norm(pos_error, dim=-1)
         self.metrics["orientation_error"] = torch.norm(rot_error, dim=-1)
         self.metrics["drone_to_goal_distance"] = torch.norm(self.drone_to_goal_error, dim=-1).mean(dim=-1)
+
+        # TURN ON FOR XYZ DEBUG FALCON12
+        # if self.num_envs == 1:
+        #     # Extract XYZ for environment 0, drone 0 (Falcon1) and drone 1 (Falcon2)
+        #     f1_pos = self.drone_positions[0, 0]
+        #     f2_pos = self.drone_positions[0, 1]
+            
+        #     # Print to console formatted to 3 decimal places
+        #     print(f"[PLAY Debug] Falcon 1 XYZ: ({f1_pos[0]:.3f}, {f1_pos[1]:.3f}, {f1_pos[2]:.3f})  |  "
+        #           f"Falcon 2 XYZ: ({f2_pos[0]:.3f}, {f2_pos[1]:.3f}, {f2_pos[2]:.3f})")
 
     def _cable_collision(
         self,

@@ -219,6 +219,7 @@ class DirectMARLFlyrodEnv(DirectMARLEnv):
         # termination buffers
         self.falcon_fly_low = torch.zeros(self.num_envs, device=self.device, dtype=torch.bool)
         self.payload_fly_low = torch.zeros(self.num_envs, device=self.device, dtype=torch.bool)
+        self.falcon_fly_high = torch.zeros(self.num_envs, device=self.device, dtype=torch.bool)
         self.illegal_contact = torch.zeros(self.num_envs, device=self.device, dtype=torch.bool)
         self.angle_limit_drone = torch.zeros(self.num_envs, device=self.device, dtype=torch.bool)
         self.angle_limit_load = torch.zeros(self.num_envs, device=self.device, dtype=torch.bool)
@@ -773,6 +774,7 @@ class DirectMARLFlyrodEnv(DirectMARLEnv):
         # crashing into ground
         self.falcon_fly_low = (self.drone_positions[:, :, 2] < self.cfg.fly_low_threshold).any(dim=-1)
         self.payload_fly_low = self.load_position[:, 2] < self.cfg.fly_low_threshold
+        self.falcon_fly_high = (self.drone_positions[:, :, 2] > self.cfg.fly_high_threshold).any(dim=-1)
 
         # illegal contact
         contact_sensor = self.scene.sensors[self.cfg.sensor_cfg.name]
@@ -862,6 +864,7 @@ class DirectMARLFlyrodEnv(DirectMARLEnv):
         terminations = (
             self.falcon_fly_low
             | self.payload_fly_low
+            | self.falcon_fly_high
             | self.illegal_contact
             | self.drone_collision
             | self.body_pos_outside
@@ -956,6 +959,9 @@ class DirectMARLFlyrodEnv(DirectMARLEnv):
         self.extras["log"]["Episode_Termination/falcon_fly_low"] = torch.count_nonzero(
             self.falcon_fly_low[env_ids_tensor]
         ).item()
+        self.extras["log"]["Episode_Termination/falcon_fly_high"] = torch.count_nonzero(
+            self.falcon_fly_high[env_ids_tensor]
+        ).item()
         self.extras["log"]["Episode_Termination/payload_fly_low"] = torch.count_nonzero(
             self.payload_fly_low[env_ids_tensor]
         ).item()
@@ -1022,6 +1028,28 @@ class DirectMARLFlyrodEnv(DirectMARLEnv):
         self.metrics["position_error"] = torch.norm(pos_error, dim=-1)
         self.metrics["orientation_error"] = torch.norm(rot_error, dim=-1)
         self.metrics["drone_to_goal_distance"] = torch.norm(self.drone_to_goal_error, dim=-1).mean(dim=-1)
+
+        # turn on for xyz debug falcon12
+        if self.num_envs == 1:
+            # Extract XYZ for environment 0, drone 0 (Falcon1) and drone 1 (Falcon2)
+            # f1_pos = self.drone_positions[0, 0]
+            # f2_pos = self.drone_positions[0, 1]
+
+            # Extract Payload Roll, Pitch, Yaw from the quaternion for environment 0
+            payload_quat = self.load_orientation[0].unsqueeze(0)  # Shape (1, 4)
+            roll, pitch, yaw = euler_xyz_from_quat(payload_quat)
+            
+            # Convert from radians to degrees
+            roll_deg = torch.rad2deg(roll[0])
+            pitch_deg = torch.rad2deg(pitch[0])
+            yaw_deg = torch.rad2deg(yaw[0])
+
+            # Print to console formatted to 3 decimal places
+            # print(f"[PLAY Debug] Falcon 1 XYZ: ({f1_pos[0]:.3f}, {f1_pos[1]:.3f}, {f1_pos[2]:.3f})  |  "
+            #       f"Falcon 2 XYZ: ({f2_pos[0]:.3f}, {f2_pos[1]:.3f}, {f2_pos[2]:.3f})")
+            print(f"[PLAY Debug] Payload RPY: (Roll: {roll_deg:.3f}°, Pitch: {pitch_deg:.3f}°, Yaw: {yaw_deg:.3f}°)")
+            
+        
 
     def _cable_collision(
         self,

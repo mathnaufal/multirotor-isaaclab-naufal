@@ -41,7 +41,7 @@ class EventCfg:
         params={
             "pose_range": {
                 "x": (-6.0, -6.0),
-                "y": (-6.0, 6.0),
+                "y": (-1.0, 1.0),
                 "z": (1.5, 1.5),
                 "roll": (-0, 0),
                 "pitch": (-0, 0),
@@ -90,7 +90,7 @@ class EventCfg_PLAY(EventCfg):
         params={
             "pose_range": {
                 "x": (-6.0, -6.0),
-                "y": (-6.0, 6.0),
+                "y": (0.0, 0.0),
                 "z": (1.5, 1.5),
                 "roll": (-0, 0),
                 "pitch": (-0, 0),
@@ -203,37 +203,37 @@ class MySceneCfg(InteractiveSceneCfg):
 
     # LiDAR disabled by request.
     # Keep these definitions commented for quick re-enable later if needed.
-    # lidar_falcon1: MultiMeshRayCasterCfg = MultiMeshRayCasterCfg(
-    #     prim_path="{ENV_REGEX_NS}/Flyrodv2/Falcon1_base_link",
-    #     update_period=0.0,
-    #     offset=MultiMeshRayCasterCfg.OffsetCfg(pos=(0.0, 0.0, 0.0), rot=(1.0, 0.0, 0.0, 0.0)),
-    #     mesh_prim_paths=["{ENV_REGEX_NS}/Wall_.*"],
-    #     ray_alignment="yaw",
-    #     pattern_cfg=patterns.LidarPatternCfg(
-    #         channels=1,
-    #         vertical_fov_range=(0.0, 0.0),
-    #         horizontal_fov_range=(-90.0, 90.0),
-    #         horizontal_res=15.0,
-    #     ),
-    #     max_distance=10.0,
-    #     debug_vis=False,
-    # )
+    lidar_falcon1: MultiMeshRayCasterCfg = MultiMeshRayCasterCfg(
+        prim_path="{ENV_REGEX_NS}/Flyrodv2/Falcon1_base_link",
+        update_period=0.0,
+        offset=MultiMeshRayCasterCfg.OffsetCfg(pos=(0.0, 0.0, 0.0), rot=(1.0, 0.0, 0.0, 0.0)),
+        mesh_prim_paths=["{ENV_REGEX_NS}/Wall_.*"],
+        ray_alignment="yaw",
+        pattern_cfg=patterns.LidarPatternCfg(
+            channels=1,
+            vertical_fov_range=(0.0, 0.0),
+            horizontal_fov_range=(-90.0, 90.0),
+            horizontal_res=15.0,
+        ),
+        max_distance=10.0,
+        debug_vis=False,
+    )
 
-    # lidar_falcon2: MultiMeshRayCasterCfg = MultiMeshRayCasterCfg(
-    #     prim_path="{ENV_REGEX_NS}/Flyrodv2/Falcon2_base_link",
-    #     update_period=0.0,
-    #     offset=MultiMeshRayCasterCfg.OffsetCfg(pos=(0.0, 0.0, 0.0), rot=(1.0, 0.0, 0.0, 0.0)),
-    #     mesh_prim_paths=["{ENV_REGEX_NS}/Wall_.*"],
-    #     ray_alignment="yaw",
-    #     pattern_cfg=patterns.LidarPatternCfg(
-    #         channels=1,
-    #         vertical_fov_range=(0.0, 0.0),
-    #         horizontal_fov_range=(-90.0, 90.0),
-    #         horizontal_res=15.0,
-    #     ),
-    #     max_distance=10.0,
-    #     debug_vis=False,
-    # )
+    lidar_falcon2: MultiMeshRayCasterCfg = MultiMeshRayCasterCfg(
+        prim_path="{ENV_REGEX_NS}/Flyrodv2/Falcon2_base_link",
+        update_period=0.0,
+        offset=MultiMeshRayCasterCfg.OffsetCfg(pos=(0.0, 0.0, 0.0), rot=(1.0, 0.0, 0.0, 0.0)),
+        mesh_prim_paths=["{ENV_REGEX_NS}/Wall_.*"],
+        ray_alignment="yaw",
+        pattern_cfg=patterns.LidarPatternCfg(
+            channels=1,
+            vertical_fov_range=(0.0, 0.0),
+            horizontal_fov_range=(-90.0, 90.0),
+            horizontal_res=15.0,
+        ),
+        max_distance=10.0,
+        debug_vis=False,
+    )
 
 
 @configclass
@@ -261,15 +261,15 @@ class DirectMARLFlyrodEnvCfg(DirectMARLEnvCfg):
 
     # LiDAR is disabled for the checkpoint-compatible observation layout.
     # Set this to 13 and re-enable the LiDAR branch if you retrain with ray features.
-    num_lidar_rays = 0
+    num_lidar_rays = 13
 
     if control_mode == "THRUST":
         action_dim_thrust = 4  # per-drone rotor thrust commands
         action_spaces = {"falcon1": action_dim_thrust, "falcon2": action_dim_thrust}
         if partial_obs:
-            obs_dim_thrust = 39 * history_len
+            obs_dim_thrust = (39 + 13) * history_len
         else:
-            obs_dim_thrust = 66
+            obs_dim_thrust = 66 + 13
         observation_spaces = {
             "falcon1": obs_dim_thrust,
             "falcon2": obs_dim_thrust,
@@ -359,6 +359,8 @@ class DirectMARLFlyrodEnvCfg(DirectMARLEnvCfg):
     action_smoothness_weight = 0.0
     body_rate_penalty_weight = 0.0
     force_penalty_weight = 0.0
+    wall_penalty_weight: float = 2.0
+    wall_distance_threshold: float = 0.5  # Penalize if drone gets within 1.0 meters of a wall
 
     rope_vertical_weight = 0.0
     rod_half_length = 0.275  # attach offsets in rod local frame: drone1 at +x, drone2 at -x

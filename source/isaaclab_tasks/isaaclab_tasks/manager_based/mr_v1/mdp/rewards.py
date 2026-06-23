@@ -102,6 +102,26 @@ def progress_to_goal(
     current_position = asset.data.root_pos_w - env.scene.env_origins
     current_dist = torch.norm(target_position_w - current_position, p=2, dim=1)
 
+    # ==========================================================
+    # --- NEW: PLAY MODE DEBUG PRINT (SINGLE AGENT) ---
+    # ==========================================================
+    if env.num_envs == 1:
+        try:
+            # Find the exact body index dynamically for the single Falcon
+            f_idx, _ = asset.find_bodies(".*Falcon.*")
+            
+            if len(f_idx) > 0:
+                # Grab the world position and subtract the environment origin
+                f_pos = asset.data.body_pos_w[0, f_idx[0]] - env.scene.env_origins[0]
+                print(f"[PLAY Debug] Falcon XYZ: ({f_pos[0]:.3f}, {f_pos[1]:.3f}, {f_pos[2]:.3f})")
+            else:
+                # Fallback just in case the body names don't match
+                root_pos = current_position[0]
+                print(f"[PLAY Debug] Payload Root XYZ: ({root_pos[0]:.3f}, {root_pos[1]:.3f}, {root_pos[2]:.3f})")
+        except Exception:
+            pass
+    # ==========================================================
+
     progress_state: dict[str, Any] = env.__dict__.setdefault("_simple_prog_state", {})
     prev_dist = progress_state.get("prev_dist")
     if prev_dist is None or prev_dist.shape[0] != env.num_envs:
