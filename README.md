@@ -10,4 +10,4 @@ This repository contains the implementation of my undergraduate thesis at ITB. T
 
 ## Comments
 
-The structure of this repository is disordered, it is a cloned repo from Isaac Lab ([text](https://github.com/isaac-sim/IsaacLab)), which was then added with another cloned repo from ([text](https://github.com/Aerial-Manipulation-Lab/MARL_cooperative_aerial_manipulation_ext)) to implement the MAPPO skrl framework and drone model.
+The structure of this repository is disordered, it is a cloned repo from ([Isaac Lab](https://github.com/isaac-sim/IsaacLab)), which was then added with another cloned repo from ([Zeng2025](https://github.com/Aerial-Manipulation-Lab/MARL_cooperative_aerial_manipulation_ext)) to implement the MAPPO skrl framework and drone model.
