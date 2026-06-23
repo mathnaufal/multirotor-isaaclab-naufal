@@ -23,17 +23,19 @@ https://github.com/user-attachments/assets/611a70c2-daee-4329-bc51-ec63da0029f6
 
 https://github.com/user-attachments/assets/33ab060a-0348-4eef-bd25-0f24d86ece60
 
+### Learning Curve
+
+<p align="left">
+  <img src="results/figures/learningcurve_1.png" width="50%">
+</p>
+
 ### Trajectory Plots
 
 <p align="left">
   <img src="results/figures/2dtrajectory.png" width="50%">
 </p>
 
-### Learning Curve
-
-<p align="left">
-  <img src="results/figures/learningcurve_1.png" width="50%">
-</p>
+Plots above show the results at 400K episodes (upper row), which shows the first reward plateau, and at 1.5M episodes (lower row), which shows the final reward plateau.
 
 ## Comments
 
