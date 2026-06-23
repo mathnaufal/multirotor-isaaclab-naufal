@@ -14,11 +14,11 @@ This repository contains the implementation of my undergraduate thesis at Instit
 
 ### Videos
 
-<video controls src="results/videos/WORLD_NEGATIVE_2026-06-08_23-07-17_mappo_torch_direct_marl.mp4" title="Left Initial Condition"></video>
+https://github.com/user-attachments/assets/ce6e0dea-b896-400b-84b9-6969446bb4df
 
-<video controls src="results/videos/WORLD_ZERO_2026-06-08_23-07-17_mappo_torch_direct_marl.mp4" title="Middle Initial Condition"></video>
+https://github.com/user-attachments/assets/611a70c2-daee-4329-bc51-ec63da0029f6
 
-<video controls src="results/videos/WORLD_POSITIVE_2026-06-08_23-07-17_mappo_torch_direct_marl.mp4" title="Right Initial Condition"></video>
+https://github.com/user-attachments/assets/33ab060a-0348-4eef-bd25-0f24d86ece60
 
 ### Trajectory Plots
 
