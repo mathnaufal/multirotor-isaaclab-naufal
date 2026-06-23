@@ -1,4 +1,4 @@
-[TA2_Naufal (Draft).pdf](https://github.com/user-attachments/files/29236517/TA2_Naufal.Draft.pdf)# Deep Multi-Agent Reinforcement Learning for Cooperative Multi-UAV Payload Transportation
+# Deep Multi-Agent Reinforcement Learning for Cooperative Multi-UAV Payload Transportation
 
 ## Overview
 
