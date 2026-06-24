@@ -30,11 +30,11 @@ This repository contains the implementation of my undergraduate thesis at Instit
 
 ### Videos
 
-https://github.com/user-attachments/assets/ce6e0dea-b896-400b-84b9-6969446bb4df
+https://github.com/user-attachments/assets/3e9f20de-fcec-410b-8828-5abea6d9d15f
 
-https://github.com/user-attachments/assets/611a70c2-daee-4329-bc51-ec63da0029f6
+https://github.com/user-attachments/assets/baa25a6d-3c64-4abf-926b-ac409a05ebe0
 
-https://github.com/user-attachments/assets/33ab060a-0348-4eef-bd25-0f24d86ece60
+https://github.com/user-attachments/assets/e31b37a8-f257-4277-96fd-cf88e382be82
 
 ### Learning Curve
 
