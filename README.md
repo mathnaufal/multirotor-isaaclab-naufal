@@ -4,7 +4,7 @@ Thesis Draft (06/24/2026): [TA2_Naufal.pdf](https://github.com/user-attachments/
 
 ## Overview
 
-This repository contains the implementation of my undergraduate thesis at Institut Teknologi Bandung (ITB). This thesis aims to investigate cooperative payload transportation of multi-UAV systems with Multi-Agent RL using NVIDIA's Isaac Lab, navigating through constrained environments.
+This repository contains the implementation of my undergraduate thesis at Institut Teknologi Bandung (ITB). This thesis aims to analyze cooperative payload transportation of multi-UAV systems with Multi-Agent RL using NVIDIA's Isaac Lab, navigating through constrained environments.
 
 ## Objectives
 
