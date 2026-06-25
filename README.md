@@ -1,4 +1,4 @@
-Thesis Draft (06/24/2026): [TA2_Naufal.pdf](https://github.com/user-attachments/files/29276683/TA2_Naufal.pdf)
+Thesis Draft (06/25/2026): [TA2_Naufal.pdf](https://github.com/user-attachments/files/29322990/TA2_Naufal.pdf)
 
 # Deep Multi-Agent Reinforcement Learning for Cooperative Multi-UAV Payload Transportation
 
