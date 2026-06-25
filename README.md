@@ -18,6 +18,7 @@ This repository contains the implementation of my undergraduate thesis at Instit
 - The physical dynamics and control policies are analyzed in the 3D space.
 - The 6-degree-of-freedom (6-DoF) rigid body dynamics and physical interactions between the UAVs and the environment are simulated in Isaac Sim, while the reinforcement learning policy is designed and simulated in Isaac Lab.
 - The evaluation of the proposed MARL algorithm is done in a simulated environment, without real-world testing.
+- The constrained environment is represented as a doorway, which is narrower than the shared payload of the multi-UAV system.
 
 ## Environment
 
